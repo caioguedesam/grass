@@ -14,11 +14,36 @@
 #include "engine/src/render/render.hpp"
 #include "engine/src/render/egui.hpp"
 
+#include "app/camera.hpp"
+
+// Single compilation unit
+#include "app/camera.cpp"
+
+// TODO_LIST:
+// App:
+// - Calculate grass positions on GPU
+// - Jitter grass positions on GPU
+// - ...
+// - GUI render pass
+// Engine:
+// - Rethink string library
+//      - Support strf
+// - Revisit all coordinate system stuff (for camera app, math matrices)
+//      - Canonical for typheus: Left handed Y up X right Z forward
+//      - Vulkan NDC: Right handed Y down X right Z forward
+//      - Always send matrices to shaders as transposed and transformed to Vk coordinates
+// - Separation of render target from render pass
+//      - This is so multiple render passes can render to the same render targets
+// - Indirect draw?
+
 #define SHADER_PATH "./app/shaders/"
 
 #define APP_W 1920
 #define APP_H 1080
 #define TERRAIN_SIZE 256
+
+namespace Grass
+{
 
 using namespace ty;
 
@@ -67,8 +92,11 @@ Handle<render::GraphicsPipeline> hPipelineTerrain;
 // App global state
 render::Window window = {};
 mem::HeapAllocator generalHeap = {};
-math::v3f cameraPos = {0,2,-1};
-math::v3f cameraTarget = {0,0,0};
+//math::v3f cameraPos = {0,2,-1};
+//math::v3f cameraTarget = {0,0,0};
+//Camera camera = MakeCamera({0, 2, -1}, math::Normalize(math::v3f{0, -2, 1}), TO_RAD(45.f), (f32)APP_W/(f32)APP_H);
+Camera camera = {};
+
 i32 frame = 0;
 f32 dt = 0;
 time::Timer frameTimer = {};
@@ -85,6 +113,7 @@ void AppInit()
 {
     // Systems
     time::Init();
+    input::Init();
     asset::Init();
 
     render::MakeWindow(&window, APP_W, APP_H, "Grass");
@@ -135,10 +164,19 @@ void AppInit()
     pipelineTerrainDesc.pushConstantRanges[0].size = sizeof(ConstantBlockTerrain);
     pipelineTerrainDesc.pushConstantRanges[0].shaderStages = render::SHADER_TYPE_VERTEX;
     hPipelineTerrain = render::MakeGraphicsPipeline(hRenderPassMain, pipelineTerrainDesc, 0, NULL);
+
+    egui::Init(hRenderPassMain);
+
+    //camera = MakeCamera({0, 2, -1}, 0, TO_RAD(-90.f), TO_RAD(45.f), (f32)APP_W/(f32)APP_H);
+    camera = MakeCamera({0, 2, -1}, math::Normalize(math::v3f{0,-2,1}), TO_RAD(45.f), (f32)APP_W/(f32)APP_H);
+
+    input::SetMouseLock(true);
+    input::SetMouseHide(true);
 }
 
 void AppShutdown()
 {
+    egui::Shutdown();
     render::Shutdown();
     render::DestroyWindow(&window);
 
@@ -150,8 +188,27 @@ void AppUpdate()
     window.PollMessages();
     // TODO(caio): Set camera movement
 
-    constantsTerrain.view = math::Transpose(math::LookAt(cameraPos, cameraTarget, {0,1,0}));
-    constantsTerrain.proj = math::Transpose(math::Perspective(TO_RAD(45.f), (f32)APP_W/(f32)APP_H, 0.1f, 100.f));
+    input::Update();
+    if(input::IsKeyDown(input::KEY_ESCAPE))
+    {
+        window.state = render::WINDOW_CLOSED;
+        return;
+    }
+
+    math::v3f cameraInputPos = {0,0,0};
+    if(input::IsKeyDown(input::KEY_W)) cameraInputPos.z += 1;
+    if(input::IsKeyDown(input::KEY_S)) cameraInputPos.z -= 1;
+    if(input::IsKeyDown(input::KEY_A)) cameraInputPos.x += 1;
+    if(input::IsKeyDown(input::KEY_D)) cameraInputPos.x -= 1;
+    math::v2f cameraInputRot = input::GetMouseDelta();
+    cameraInputRot.x *= -1.f;
+    RotateCamera(camera, cameraInputRot, TO_RAD(360.f) * 2.f, dt);
+    MoveCamera(camera, cameraInputPos, 5.f, dt);
+
+    //constantsTerrain.view = math::Transpose(math::LookAt(cameraPos, cameraTarget, {0,1,0}));
+    //constantsTerrain.proj = math::Transpose(math::Perspective(TO_RAD(45.f), (f32)APP_W/(f32)APP_H, 0.1f, 100.f));
+    constantsTerrain.view = math::Transpose(camera.GetView());
+    constantsTerrain.proj = math::Transpose(camera.GetProjection());
 }
 
 void AppRender(i32 frame)
@@ -160,6 +217,7 @@ void AppRender(i32 frame)
     Handle<render::CommandBuffer> hCmd = render::GetAvailableCommandBuffer(render::COMMAND_BUFFER_FRAME, frame);
     render::BeginFrame(frame);
     render::BeginCommandBuffer(hCmd);
+    egui::BeginFrame();
 
     // Frame commands
     // Clear render output
@@ -185,6 +243,19 @@ void AppRender(i32 frame)
     render::CmdBindVertexBuffer(hCmd, hVbTerrain);
     render::CmdBindIndexBuffer(hCmd, hIbTerrain);
     render::CmdDrawIndexed(hCmd, hIbTerrain, 1);
+
+    char testbuf[2048];
+    //sprintf(testbuf, "pitch %.2f", camera.pitch);
+    //egui::Text(IStr(testbuf));
+    //sprintf(testbuf, "yaw %.2f", camera.yaw);
+    //egui::Text(IStr(testbuf));
+    sprintf(testbuf, "camera axisRight %.2f %.2f %.2f", camera.axisRight.x, camera.axisRight.y, camera.axisRight.z);
+    egui::Text(IStr(testbuf));
+    sprintf(testbuf, "camera axisUp %.2f %.2f %.2f", camera.axisUp.x, camera.axisUp.y, camera.axisUp.z);
+    egui::Text(IStr(testbuf));
+    sprintf(testbuf, "camera axisFront %.2f %.2f %.2f", camera.axisFront.x, camera.axisFront.y, camera.axisFront.z);
+    egui::Text(IStr(testbuf));
+    egui::DrawFrame(hCmd);
     render::EndRenderPass(hCmd, hRenderPassMain);
 
     // Copy to swap chain image and end frame
@@ -201,8 +272,12 @@ void AppRender(i32 frame)
     render::Present(frame);
 }
 
+};  // namespace Grass
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, PWSTR pCmdLine, int nCmdShow)
 {
+    using namespace Grass;
+
     AppInit();
 
     while(window.state != render::WINDOW_CLOSED)
