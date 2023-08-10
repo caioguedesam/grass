@@ -1,3 +1,4 @@
 .vim/
 build/*
+resources/*
 imgui.ini

@@ -14,12 +14,208 @@
 #include "engine/src/render/render.hpp"
 #include "engine/src/render/egui.hpp"
 
+#define SHADER_PATH "./app/shaders/"
+
+#define APP_W 1920
+#define APP_H 1080
+#define TERRAIN_SIZE 256
+
+using namespace ty;
+
+// App data
+// Base terrain quad on x-z plane
+f32 terrainQuadData[] =
+{
+    // position (x, y, z), normal (x, y, z), uv (u, v)
+    -0.5f, 0.f, -0.5f,  0.f, 1.f, 0.f, 0.f, 0.f,
+    0.5f, 0.f, -0.5f,   0.f, 1.f, 0.f, 0.f, 0.f,
+    0.5f, 0.f, 0.5f,    0.f, 1.f, 0.f, 0.f, 0.f,
+    -0.5f, 0.f, 0.5f,   0.f, 1.f, 0.f, 0.f, 0.f,
+};
+
+u32 terrainQuadIndices[] =
+{
+    0, 2, 1, 0, 3, 2,
+    //TODO(caio): CONTINUE
+    // - Why does this work as front when I have front as CCW? Verify
+    // - Compute shader for sampling uniform points on terrain
+    // - Render sampled points
+    // - Introduce noise in sampling
+};
+
+// App assets
+Handle<asset::Shader> hAssetVsTerrain;
+Handle<asset::Shader> hAssetPsTerrain;
+
+// App resources
+Handle<render::Shader> hVsTerrain;
+Handle<render::Shader> hPsTerrain;
+Handle<render::Buffer> hVbTerrain;
+Handle<render::Buffer> hIbTerrain;
+struct ConstantBlockTerrain
+{
+    math::m4f view = {};
+    math::m4f proj = {};
+};
+ConstantBlockTerrain constantsTerrain;
+
+// App render pipeline
+Handle<render::RenderPass> hRenderPassMain;
+Handle<render::VertexLayout> hVertexLayoutTerrain;
+Handle<render::GraphicsPipeline> hPipelineTerrain;
+
+// App global state
+render::Window window = {};
+mem::HeapAllocator generalHeap = {};
+math::v3f cameraPos = {0,2,-1};
+math::v3f cameraTarget = {0,0,0};
+i32 frame = 0;
+f32 dt = 0;
+time::Timer frameTimer = {};
+
+void InitShader(render::ShaderType type, file::Path assetPath, Handle<asset::Shader>* handle, Handle<render::Shader>* resource)
+{
+    ASSERT(handle && resource);
+    *handle = asset::LoadShader(assetPath);
+    asset::Shader& assetShader = asset::shaders[*handle];
+    *resource = render::MakeShader(type, assetShader.size, assetShader.data);
+}
+
+void AppInit()
+{
+    // Systems
+    time::Init();
+    asset::Init();
+
+    render::MakeWindow(&window, APP_W, APP_H, "Grass");
+    render::Init(&window);
+
+    generalHeap = mem::MakeHeapAllocator(MB(128));
+
+    // Assets and resources
+    InitShader(render::SHADER_TYPE_VERTEX, file::MakePath(IStr(SHADER_PATH"terrain.vert")), &hAssetVsTerrain, &hVsTerrain);
+    InitShader(render::SHADER_TYPE_PIXEL, file::MakePath(IStr(SHADER_PATH"terrain.frag")), &hAssetPsTerrain, &hPsTerrain);
+    hVbTerrain = render::MakeBuffer(render::BUFFER_TYPE_VERTEX,
+            ARR_LEN(terrainQuadData) * sizeof(f32),
+            sizeof(f32),
+            terrainQuadData);
+    hIbTerrain = render::MakeBuffer(render::BUFFER_TYPE_INDEX,
+            ARR_LEN(terrainQuadIndices) * sizeof(u32),
+            sizeof(u32),
+            terrainQuadIndices);
+
+    // Render pipeline
+    render::RenderPassDesc renderPassMainDesc = {};
+    renderPassMainDesc.width = APP_W;
+    renderPassMainDesc.height = APP_H;
+    renderPassMainDesc.loadOp = render::LOAD_OP_LOAD;
+    renderPassMainDesc.storeOp = render::STORE_OP_STORE;
+    renderPassMainDesc.initialLayout = render::IMAGE_LAYOUT_TRANSFER_DST;
+    renderPassMainDesc.finalLayout = render::IMAGE_LAYOUT_TRANSFER_SRC;
+    render::Format renderPassMainColorFormats[] =
+    {
+        render::FORMAT_RGBA8_SRGB,
+    };
+    hRenderPassMain = render::MakeRenderPass(renderPassMainDesc, 1, renderPassMainColorFormats, render::FORMAT_D32_FLOAT);
+
+    render::VertexAttribute vertexAttributesTerrain[] =
+    {
+        render::VERTEX_ATTR_V3F,
+        render::VERTEX_ATTR_V3F,
+        render::VERTEX_ATTR_V2F,
+    };
+    hVertexLayoutTerrain = render::MakeVertexLayout(ARR_LEN(vertexAttributesTerrain), vertexAttributesTerrain);
+
+    render::GraphicsPipelineDesc pipelineTerrainDesc = {};
+    pipelineTerrainDesc.hVertexLayout = hVertexLayoutTerrain;
+    pipelineTerrainDesc.hShaderVertex = hVsTerrain;
+    pipelineTerrainDesc.hShaderPixel = hPsTerrain;
+    pipelineTerrainDesc.pushConstantRangeCount = 1;
+    pipelineTerrainDesc.pushConstantRanges[0].offset = 0;
+    pipelineTerrainDesc.pushConstantRanges[0].size = sizeof(ConstantBlockTerrain);
+    pipelineTerrainDesc.pushConstantRanges[0].shaderStages = render::SHADER_TYPE_VERTEX;
+    hPipelineTerrain = render::MakeGraphicsPipeline(hRenderPassMain, pipelineTerrainDesc, 0, NULL);
+}
+
+void AppShutdown()
+{
+    render::Shutdown();
+    render::DestroyWindow(&window);
+
+    mem::DestroyHeapAllocator(&generalHeap);
+}
+
+void AppUpdate()
+{
+    window.PollMessages();
+    // TODO(caio): Set camera movement
+
+    constantsTerrain.view = math::Transpose(math::LookAt(cameraPos, cameraTarget, {0,1,0}));
+    constantsTerrain.proj = math::Transpose(math::Perspective(TO_RAD(45.f), (f32)APP_W/(f32)APP_H, 0.1f, 100.f));
+}
+
+void AppRender(i32 frame)
+{
+    // Frame setup
+    Handle<render::CommandBuffer> hCmd = render::GetAvailableCommandBuffer(render::COMMAND_BUFFER_FRAME, frame);
+    render::BeginFrame(frame);
+    render::BeginCommandBuffer(hCmd);
+
+    // Frame commands
+    // Clear render output
+    render::Barrier barrier = {};
+    barrier.srcAccess = render::MEMORY_ACCESS_NONE;
+    barrier.dstAccess = render::MEMORY_ACCESS_TRANSFER_WRITE;
+    barrier.srcStage = render::PIPELINE_STAGE_TOP;
+    barrier.dstStage = render::PIPELINE_STAGE_TRANSFER;
+    render::CmdPipelineBarrierTextureLayout(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0), render::IMAGE_LAYOUT_TRANSFER_DST, barrier);
+    render::CmdClearColorTexture(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0), 1, 0.5, 0.3, 1);
+    barrier.srcAccess = render::MEMORY_ACCESS_TRANSFER_WRITE;
+    barrier.dstAccess = render::MEMORY_ACCESS_COLOR_OUTPUT_WRITE;
+    barrier.srcStage = render::PIPELINE_STAGE_TRANSFER;
+    barrier.dstStage = render::PIPELINE_STAGE_FRAGMENT_SHADER;
+    render::CmdPipelineBarrierTextureLayout(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0), render::IMAGE_LAYOUT_COLOR_OUTPUT, barrier);
+
+    // Render terrain
+    render::BeginRenderPass(hCmd, hRenderPassMain);
+    render::CmdBindGraphicsPipeline(hCmd, hPipelineTerrain);
+    render::CmdUpdatePushConstantRange(hCmd, 0, &constantsTerrain, hPipelineTerrain);
+    render::CmdSetViewport(hCmd, hRenderPassMain);
+    render::CmdSetScissor(hCmd, hRenderPassMain);
+    render::CmdBindVertexBuffer(hCmd, hVbTerrain);
+    render::CmdBindIndexBuffer(hCmd, hIbTerrain);
+    render::CmdDrawIndexed(hCmd, hIbTerrain, 1);
+    render::EndRenderPass(hCmd, hRenderPassMain);
+
+    // Copy to swap chain image and end frame
+    barrier.srcAccess = render::MEMORY_ACCESS_COLOR_OUTPUT_WRITE;
+    barrier.dstAccess = render::MEMORY_ACCESS_TRANSFER_READ;
+    barrier.srcStage = render::PIPELINE_STAGE_COLOR_OUTPUT;
+    barrier.dstStage = render::PIPELINE_STAGE_TRANSFER;
+    render::CmdPipelineBarrierTextureLayout(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0), render::IMAGE_LAYOUT_TRANSFER_SRC, barrier);
+    render::CmdCopyToSwapChain(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0));
+    render::EndCommandBuffer(hCmd);
+    render::EndFrame(frame, hCmd);
+
+    // Present
+    render::Present(frame);
+}
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, PWSTR pCmdLine, int nCmdShow)
 {
-    using namespace ty;
+    AppInit();
 
-    LOG("Typheus app!");
+    while(window.state != render::WINDOW_CLOSED)
+    {
+        frameTimer.Start();
+        AppUpdate();
+        AppRender(frame);
+        frameTimer.Stop();
+        dt = (f32)frameTimer.GetElapsedS();
+        frame++;
+    }
 
+    AppShutdown();
     return 0;
 }
 
