@@ -28,10 +28,6 @@
 // Engine:
 // - Rethink string library
 //      - Support strf
-// - Revisit all coordinate system stuff (for camera app, math matrices)
-//      - Canonical for typheus: Left handed Y up X right Z forward
-//      - Vulkan NDC: Right handed Y down X right Z forward
-//      - Always send matrices to shaders as transposed and transformed to Vk coordinates
 // - Separation of render target from render pass
 //      - This is so multiple render passes can render to the same render targets
 // - Indirect draw?
@@ -47,7 +43,40 @@ namespace Grass
 
 using namespace ty;
 
+#define COORD_DEBUG 1
 // App data
+#if COORD_DEBUG
+// Debug unlit rects for coordinate system testing
+f32 xAxisQuadData[] =
+{
+    0, 0, 0,    0, 1, 0, 0, 0,
+    1, 0, 0,    0, 1, 0, 0, 0,
+    1, 0, 0.2f, 0, 1, 0, 0, 0,
+    0, 0, 0.2f, 0, 1, 0, 0, 0,
+};
+
+f32 yAxisQuadData[] =
+{
+    0, 0, 0,    0, 1, 0, 0, 0,
+    0.2f, 0, 0, 0, 1, 0, 0, 0,
+    0.2f, 1, 0, 0, 1, 0, 0, 0,
+    0, 1, 0,    0, 1, 0, 0, 0,
+};
+
+f32 zAxisQuadData[] =
+{
+    0, 0, 0,    0, 1, 0, 0, 0,
+    0.2f, 0, 0, 0, 1, 0, 0, 0,
+    0.2f, 0, 1, 0, 1, 0, 0, 0,
+    0, 0, 1,    0, 1, 0, 0, 0,
+};
+
+u32 axisQuadIndices[] =
+{
+    0, 1, 2, 0, 2, 3,
+};
+#endif
+
 // Base terrain quad on x-z plane
 f32 terrainQuadData[] =
 {
@@ -60,12 +89,7 @@ f32 terrainQuadData[] =
 
 u32 terrainQuadIndices[] =
 {
-    0, 2, 1, 0, 3, 2,
-    //TODO(caio): CONTINUE
-    // - Why does this work as front when I have front as CCW? Verify
-    // - Compute shader for sampling uniform points on terrain
-    // - Render sampled points
-    // - Introduce noise in sampling
+    0, 1, 2, 0, 2, 3,
 };
 
 // App assets
@@ -77,6 +101,13 @@ Handle<render::Shader> hVsTerrain;
 Handle<render::Shader> hPsTerrain;
 Handle<render::Buffer> hVbTerrain;
 Handle<render::Buffer> hIbTerrain;
+#if COORD_DEBUG
+Handle<render::Buffer> hIbAxis;
+Handle<render::Buffer> hVbAxisX;
+Handle<render::Buffer> hVbAxisY;
+Handle<render::Buffer> hVbAxisZ;
+#endif
+
 struct ConstantBlockTerrain
 {
     math::m4f view = {};
@@ -92,9 +123,6 @@ Handle<render::GraphicsPipeline> hPipelineTerrain;
 // App global state
 render::Window window = {};
 mem::HeapAllocator generalHeap = {};
-//math::v3f cameraPos = {0,2,-1};
-//math::v3f cameraTarget = {0,0,0};
-//Camera camera = MakeCamera({0, 2, -1}, math::Normalize(math::v3f{0, -2, 1}), TO_RAD(45.f), (f32)APP_W/(f32)APP_H);
 Camera camera = {};
 
 i32 frame = 0;
@@ -132,6 +160,25 @@ void AppInit()
             ARR_LEN(terrainQuadIndices) * sizeof(u32),
             sizeof(u32),
             terrainQuadIndices);
+#if COORD_DEBUG
+    hIbAxis = render::MakeBuffer(render::BUFFER_TYPE_INDEX,
+            ARR_LEN(axisQuadIndices) * sizeof(u32),
+            sizeof(u32),
+            axisQuadIndices);
+    hVbAxisX = render::MakeBuffer(render::BUFFER_TYPE_VERTEX,
+            ARR_LEN(xAxisQuadData) * sizeof(f32),
+            sizeof(f32),
+            xAxisQuadData);
+    hVbAxisY = render::MakeBuffer(render::BUFFER_TYPE_VERTEX,
+            ARR_LEN(yAxisQuadData) * sizeof(f32),
+            sizeof(f32),
+            yAxisQuadData);
+    hVbAxisZ = render::MakeBuffer(render::BUFFER_TYPE_VERTEX,
+            ARR_LEN(zAxisQuadData) * sizeof(f32),
+            sizeof(f32),
+            zAxisQuadData);
+#endif
+    
 
     // Render pipeline
     render::RenderPassDesc renderPassMainDesc = {};
@@ -167,8 +214,9 @@ void AppInit()
 
     egui::Init(hRenderPassMain);
 
-    //camera = MakeCamera({0, 2, -1}, 0, TO_RAD(-90.f), TO_RAD(45.f), (f32)APP_W/(f32)APP_H);
-    camera = MakeCamera({0, 2, -1}, math::Normalize(math::v3f{0,-2,1}), TO_RAD(45.f), (f32)APP_W/(f32)APP_H);
+    math::v3f initialCameraPos = {-1, 2, -1};
+    math::v3f initialCamerTarget = {0, 0, 0};
+    camera = MakeCamera(initialCameraPos, math::Normalize(initialCamerTarget - initialCameraPos), TO_RAD(60.f), (f32)APP_W/(f32)APP_H);
 
     input::SetMouseLock(true);
     input::SetMouseHide(true);
@@ -198,15 +246,13 @@ void AppUpdate()
     math::v3f cameraInputPos = {0,0,0};
     if(input::IsKeyDown(input::KEY_W)) cameraInputPos.z += 1;
     if(input::IsKeyDown(input::KEY_S)) cameraInputPos.z -= 1;
-    if(input::IsKeyDown(input::KEY_A)) cameraInputPos.x += 1;
     if(input::IsKeyDown(input::KEY_D)) cameraInputPos.x -= 1;
+    if(input::IsKeyDown(input::KEY_A)) cameraInputPos.x += 1;
     math::v2f cameraInputRot = input::GetMouseDelta();
     cameraInputRot.x *= -1.f;
     RotateCamera(camera, cameraInputRot, TO_RAD(360.f) * 2.f, dt);
     MoveCamera(camera, cameraInputPos, 5.f, dt);
 
-    //constantsTerrain.view = math::Transpose(math::LookAt(cameraPos, cameraTarget, {0,1,0}));
-    //constantsTerrain.proj = math::Transpose(math::Perspective(TO_RAD(45.f), (f32)APP_W/(f32)APP_H, 0.1f, 100.f));
     constantsTerrain.view = math::Transpose(camera.GetView());
     constantsTerrain.proj = math::Transpose(camera.GetProjection());
 }
@@ -244,17 +290,25 @@ void AppRender(i32 frame)
     render::CmdBindIndexBuffer(hCmd, hIbTerrain);
     render::CmdDrawIndexed(hCmd, hIbTerrain, 1);
 
+#if COORD_DEBUG
+    render::CmdBindIndexBuffer(hCmd, hIbAxis);
+    render::CmdBindVertexBuffer(hCmd, hVbAxisX);
+    render::CmdDrawIndexed(hCmd, hIbAxis, 1);
+    render::CmdBindVertexBuffer(hCmd, hVbAxisY);
+    render::CmdDrawIndexed(hCmd, hIbAxis, 1);
+    render::CmdBindVertexBuffer(hCmd, hVbAxisZ);
+    render::CmdDrawIndexed(hCmd, hIbAxis, 1);
+
     char testbuf[2048];
-    //sprintf(testbuf, "pitch %.2f", camera.pitch);
-    //egui::Text(IStr(testbuf));
-    //sprintf(testbuf, "yaw %.2f", camera.yaw);
-    //egui::Text(IStr(testbuf));
+    sprintf(testbuf, "camera position %.2f %.2f %.2f", camera.position.x, camera.position.y, camera.position.z);
+    egui::Text(IStr(testbuf));
     sprintf(testbuf, "camera axisRight %.2f %.2f %.2f", camera.axisRight.x, camera.axisRight.y, camera.axisRight.z);
     egui::Text(IStr(testbuf));
     sprintf(testbuf, "camera axisUp %.2f %.2f %.2f", camera.axisUp.x, camera.axisUp.y, camera.axisUp.z);
     egui::Text(IStr(testbuf));
     sprintf(testbuf, "camera axisFront %.2f %.2f %.2f", camera.axisFront.x, camera.axisFront.y, camera.axisFront.z);
     egui::Text(IStr(testbuf));
+#endif
     egui::DrawFrame(hCmd);
     render::EndRenderPass(hCmd, hRenderPassMain);
 

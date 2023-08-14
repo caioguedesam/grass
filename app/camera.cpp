@@ -27,12 +27,12 @@ Camera MakeCamera(math::v3f pos, math::v3f facing, f32 fov, f32 aspect)
 
 math::m4f Camera::GetView()
 {
-    return math::LookAt(position, position + axisFront, axisUp);
+    return math::LookAtLH(position, position + axisFront, axisUp);
 }
 
 math::m4f Camera::GetProjection()
 {
-    return math::Perspective(fov, aspect, 0.1f, 100.f);
+    return math::PerspectiveLH(fov, aspect, 0.1f, 100.f);
 }
 
 void MoveCamera(Camera &cam, math::v3f moveInput, f32 speed, f32 dt)

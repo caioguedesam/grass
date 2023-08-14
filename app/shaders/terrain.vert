@@ -17,5 +17,5 @@ layout(location = 0) out struct
 void main()
 {
     gl_Position = uConstants.proj * uConstants.view * vec4(aPosition, 1);
-    VOut.Color = vec4(0.2, 1, 0, 1);
+    VOut.Color = vec4(aPosition, 1);
 }
