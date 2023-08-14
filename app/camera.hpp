@@ -13,8 +13,6 @@ struct Camera
     math::v3f axisRight = {0, 0, 0};
     math::v3f axisUp = {0, 0, 0};
 
-    f32 pitch   = 0.f;  // Rad
-    f32 yaw     = 0.f;  // Rad
     f32 fov     = 0.f;  // Rad
     f32 aspect  = 0.f;
     //TODO(caio): Near/far planes

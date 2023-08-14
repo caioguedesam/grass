@@ -26,8 +26,6 @@
 // - ...
 // - GUI render pass
 // Engine:
-// - Rethink string library
-//      - Support strf
 // - Separation of render target from render pass
 //      - This is so multiple render passes can render to the same render targets
 // - Indirect draw?
@@ -246,10 +244,10 @@ void AppUpdate()
     math::v3f cameraInputPos = {0,0,0};
     if(input::IsKeyDown(input::KEY_W)) cameraInputPos.z += 1;
     if(input::IsKeyDown(input::KEY_S)) cameraInputPos.z -= 1;
-    if(input::IsKeyDown(input::KEY_D)) cameraInputPos.x -= 1;
-    if(input::IsKeyDown(input::KEY_A)) cameraInputPos.x += 1;
+    if(input::IsKeyDown(input::KEY_A)) cameraInputPos.x -= 1;
+    if(input::IsKeyDown(input::KEY_D)) cameraInputPos.x += 1;
     math::v2f cameraInputRot = input::GetMouseDelta();
-    cameraInputRot.x *= -1.f;
+    //cameraInputRot.x *= -1.f;
     RotateCamera(camera, cameraInputRot, TO_RAD(360.f) * 2.f, dt);
     MoveCamera(camera, cameraInputPos, 5.f, dt);
 
@@ -299,15 +297,15 @@ void AppRender(i32 frame)
     render::CmdBindVertexBuffer(hCmd, hVbAxisZ);
     render::CmdDrawIndexed(hCmd, hIbAxis, 1);
 
-    char testbuf[2048];
-    sprintf(testbuf, "camera position %.2f %.2f %.2f", camera.position.x, camera.position.y, camera.position.z);
-    egui::Text(IStr(testbuf));
-    sprintf(testbuf, "camera axisRight %.2f %.2f %.2f", camera.axisRight.x, camera.axisRight.y, camera.axisRight.z);
-    egui::Text(IStr(testbuf));
-    sprintf(testbuf, "camera axisUp %.2f %.2f %.2f", camera.axisUp.x, camera.axisUp.y, camera.axisUp.z);
-    egui::Text(IStr(testbuf));
-    sprintf(testbuf, "camera axisFront %.2f %.2f %.2f", camera.axisFront.x, camera.axisFront.y, camera.axisFront.z);
-    egui::Text(IStr(testbuf));
+    SStr(debugStr, 2048);
+    str::Format(debugStr, "Camera position: %.2f\t%.2f\t%.2f", camera.position.x, camera.position.y, camera.position.z);
+    egui::Text(debugStr);
+    str::Format(debugStr, "Camera axisX: %.2f\t%.2f\t%.2f", camera.axisRight.x, camera.axisRight.y, camera.axisRight.z);
+    egui::Text(debugStr);
+    str::Format(debugStr, "Camera axisY: %.2f\t%.2f\t%.2f", camera.axisUp.x, camera.axisUp.y, camera.axisUp.z);
+    egui::Text(debugStr);
+    str::Format(debugStr, "Camera axisZ: %.2f\t%.2f\t%.2f", camera.axisFront.x, camera.axisFront.y, camera.axisFront.z);
+    egui::Text(debugStr);
 #endif
     egui::DrawFrame(hCmd);
     render::EndRenderPass(hCmd, hRenderPassMain);

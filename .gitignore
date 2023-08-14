@@ -1,4 +1,5 @@
 .vim/
 build/*
 resources/*
+temp/*
 imgui.ini
