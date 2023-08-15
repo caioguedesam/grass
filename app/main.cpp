@@ -24,10 +24,7 @@
 // - Calculate grass positions on GPU
 // - Jitter grass positions on GPU
 // - ...
-// - GUI render pass
 // Engine:
-// - Separation of render target from render pass
-//      - This is so multiple render passes can render to the same render targets
 // - Indirect draw?
 
 #define SHADER_PATH "./app/shaders/"
@@ -114,7 +111,9 @@ struct ConstantBlockTerrain
 ConstantBlockTerrain constantsTerrain;
 
 // App render pipeline
+Handle<render::RenderTarget> hRenderTargetMain;
 Handle<render::RenderPass> hRenderPassMain;
+Handle<render::RenderPass> hRenderPassUI;
 Handle<render::VertexLayout> hVertexLayoutTerrain;
 Handle<render::GraphicsPipeline> hPipelineTerrain;
 
@@ -177,20 +176,30 @@ void AppInit()
             zAxisQuadData);
 #endif
     
+    // Render outputs
+    render::RenderTargetDesc renderTargetMainDesc = {};
+    renderTargetMainDesc.width = APP_W;
+    renderTargetMainDesc.height = APP_H;
+    renderTargetMainDesc.colorImageCount = 1;
+    renderTargetMainDesc.colorImageFormats[0] = render::FORMAT_RGBA8_SRGB;
+    renderTargetMainDesc.depthImageFormat = render::FORMAT_D32_FLOAT;
+    hRenderTargetMain = render::MakeRenderTarget(renderTargetMainDesc);
 
     // Render pipeline
     render::RenderPassDesc renderPassMainDesc = {};
-    renderPassMainDesc.width = APP_W;
-    renderPassMainDesc.height = APP_H;
     renderPassMainDesc.loadOp = render::LOAD_OP_LOAD;
     renderPassMainDesc.storeOp = render::STORE_OP_STORE;
     renderPassMainDesc.initialLayout = render::IMAGE_LAYOUT_TRANSFER_DST;
-    renderPassMainDesc.finalLayout = render::IMAGE_LAYOUT_TRANSFER_SRC;
-    render::Format renderPassMainColorFormats[] =
-    {
-        render::FORMAT_RGBA8_SRGB,
-    };
-    hRenderPassMain = render::MakeRenderPass(renderPassMainDesc, 1, renderPassMainColorFormats, render::FORMAT_D32_FLOAT);
+    //renderPassMainDesc.finalLayout = render::IMAGE_LAYOUT_TRANSFER_SRC;
+    renderPassMainDesc.finalLayout = render::IMAGE_LAYOUT_COLOR_OUTPUT;
+    hRenderPassMain = render::MakeRenderPass(renderPassMainDesc, hRenderTargetMain);
+
+    render::RenderPassDesc renderPassUIDesc = {};
+    renderPassUIDesc.loadOp = render::LOAD_OP_LOAD;
+    renderPassUIDesc.storeOp = render::STORE_OP_STORE;
+    renderPassUIDesc.initialLayout = render::IMAGE_LAYOUT_COLOR_OUTPUT;
+    renderPassUIDesc.finalLayout = render::IMAGE_LAYOUT_TRANSFER_SRC;
+    hRenderPassUI = render::MakeRenderPass(renderPassUIDesc, hRenderTargetMain);
 
     render::VertexAttribute vertexAttributesTerrain[] =
     {
@@ -270,13 +279,13 @@ void AppRender(i32 frame)
     barrier.dstAccess = render::MEMORY_ACCESS_TRANSFER_WRITE;
     barrier.srcStage = render::PIPELINE_STAGE_TOP;
     barrier.dstStage = render::PIPELINE_STAGE_TRANSFER;
-    render::CmdPipelineBarrierTextureLayout(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0), render::IMAGE_LAYOUT_TRANSFER_DST, barrier);
-    render::CmdClearColorTexture(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0), 1, 0.5, 0.3, 1);
+    render::CmdPipelineBarrierTextureLayout(hCmd, render::GetColorOutput(hRenderTargetMain, 0), render::IMAGE_LAYOUT_TRANSFER_DST, barrier);
+    render::CmdClearColorTexture(hCmd, render::GetColorOutput(hRenderTargetMain, 0), 1, 0.5, 0.3, 1);
     barrier.srcAccess = render::MEMORY_ACCESS_TRANSFER_WRITE;
     barrier.dstAccess = render::MEMORY_ACCESS_COLOR_OUTPUT_WRITE;
     barrier.srcStage = render::PIPELINE_STAGE_TRANSFER;
     barrier.dstStage = render::PIPELINE_STAGE_FRAGMENT_SHADER;
-    render::CmdPipelineBarrierTextureLayout(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0), render::IMAGE_LAYOUT_COLOR_OUTPUT, barrier);
+    render::CmdPipelineBarrierTextureLayout(hCmd, render::GetColorOutput(hRenderTargetMain, 0), render::IMAGE_LAYOUT_COLOR_OUTPUT, barrier);
 
     // Render terrain
     render::BeginRenderPass(hCmd, hRenderPassMain);
@@ -307,16 +316,21 @@ void AppRender(i32 frame)
     str::Format(debugStr, "Camera axisZ: %.2f\t%.2f\t%.2f", camera.axisFront.x, camera.axisFront.y, camera.axisFront.z);
     egui::Text(debugStr);
 #endif
-    egui::DrawFrame(hCmd);
     render::EndRenderPass(hCmd, hRenderPassMain);
+
+    // Render GUI
+    render::BeginRenderPass(hCmd, hRenderPassUI);
+    egui::DrawFrame(hCmd);
+    render::EndRenderPass(hCmd, hRenderPassUI);
+    //render::EndRenderPass(hCmd, hRenderPassMain);
 
     // Copy to swap chain image and end frame
     barrier.srcAccess = render::MEMORY_ACCESS_COLOR_OUTPUT_WRITE;
     barrier.dstAccess = render::MEMORY_ACCESS_TRANSFER_READ;
     barrier.srcStage = render::PIPELINE_STAGE_COLOR_OUTPUT;
     barrier.dstStage = render::PIPELINE_STAGE_TRANSFER;
-    render::CmdPipelineBarrierTextureLayout(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0), render::IMAGE_LAYOUT_TRANSFER_SRC, barrier);
-    render::CmdCopyToSwapChain(hCmd, render::GetRenderPassOutput(hRenderPassMain, 0));
+    render::CmdPipelineBarrierTextureLayout(hCmd, render::GetColorOutput(hRenderTargetMain, 0), render::IMAGE_LAYOUT_TRANSFER_SRC, barrier);
+    render::CmdCopyToSwapChain(hCmd, render::GetColorOutput(hRenderTargetMain, 0));
     render::EndCommandBuffer(hCmd);
     render::EndFrame(frame, hCmd);
 
