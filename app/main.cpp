@@ -15,17 +15,19 @@
 #include "engine/src/render/egui.hpp"
 
 #include "app/camera.hpp"
+#include "app/grass.hpp"
 
 // Single compilation unit
 #include "app/camera.cpp"
+#include "app/grass.cpp"
 
 // TODO_LIST:
 // App:
-// - Calculate grass positions on GPU
-// - Jitter grass positions on GPU
+// - Move all to GPU
 // - ...
 // Engine:
-// - Indirect draw?
+// - Indirect draw for GPU driven rendering
+// - Persistent buffer mapping
 
 #define SHADER_PATH "./app/shaders/"
 
@@ -33,12 +35,12 @@
 #define APP_H 1080
 #define TERRAIN_SIZE 256
 
+namespace ty
+{
 namespace Grass
 {
 
-using namespace ty;
-
-#define COORD_DEBUG 1
+#define COORD_DEBUG 0
 // App data
 #if COORD_DEBUG
 // Debug unlit rects for coordinate system testing
@@ -76,10 +78,10 @@ u32 axisQuadIndices[] =
 f32 terrainQuadData[] =
 {
     // position (x, y, z), normal (x, y, z), uv (u, v)
-    -0.5f, 0.f, -0.5f,  0.f, 1.f, 0.f, 0.f, 0.f,
-    0.5f, 0.f, -0.5f,   0.f, 1.f, 0.f, 0.f, 0.f,
-    0.5f, 0.f, 0.5f,    0.f, 1.f, 0.f, 0.f, 0.f,
-    -0.5f, 0.f, 0.5f,   0.f, 1.f, 0.f, 0.f, 0.f,
+    0 * TERRAIN_SIZE, 0.f, 0 * TERRAIN_SIZE,  0.f, 1.f, 0.f, 0.f, 0.f,
+    1 * TERRAIN_SIZE, 0.f, 0 * TERRAIN_SIZE,   0.f, 1.f, 0.f, 0.f, 0.f,
+    1 * TERRAIN_SIZE, 0.f, 1 * TERRAIN_SIZE,    0.f, 1.f, 0.f, 0.f, 0.f,
+    0 * TERRAIN_SIZE, 0.f, 1 * TERRAIN_SIZE,   0.f, 1.f, 0.f, 0.f, 0.f,
 };
 
 u32 terrainQuadIndices[] =
@@ -144,7 +146,7 @@ void AppInit()
     render::MakeWindow(&window, APP_W, APP_H, "Grass");
     render::Init(&window);
 
-    generalHeap = mem::MakeHeapAllocator(MB(128));
+    generalHeap = mem::MakeHeapAllocator(GB(1));
 
     // Assets and resources
     InitShader(render::SHADER_TYPE_VERTEX, file::MakePath(IStr(SHADER_PATH"terrain.vert")), &hAssetVsTerrain, &hVsTerrain);
@@ -189,8 +191,9 @@ void AppInit()
     render::RenderPassDesc renderPassMainDesc = {};
     renderPassMainDesc.loadOp = render::LOAD_OP_LOAD;
     renderPassMainDesc.storeOp = render::STORE_OP_STORE;
-    renderPassMainDesc.initialLayout = render::IMAGE_LAYOUT_TRANSFER_DST;
+    //renderPassMainDesc.initialLayout = render::IMAGE_LAYOUT_TRANSFER_DST;
     //renderPassMainDesc.finalLayout = render::IMAGE_LAYOUT_TRANSFER_SRC;
+    renderPassMainDesc.initialLayout = render::IMAGE_LAYOUT_COLOR_OUTPUT;
     renderPassMainDesc.finalLayout = render::IMAGE_LAYOUT_COLOR_OUTPUT;
     hRenderPassMain = render::MakeRenderPass(renderPassMainDesc, hRenderTargetMain);
 
@@ -219,11 +222,20 @@ void AppInit()
     pipelineTerrainDesc.pushConstantRanges[0].shaderStages = render::SHADER_TYPE_VERTEX;
     hPipelineTerrain = render::MakeGraphicsPipeline(hRenderPassMain, pipelineTerrainDesc, 0, NULL);
 
-    egui::Init(hRenderPassMain);
+    egui::Init(hRenderPassUI);
 
-    math::v3f initialCameraPos = {-1, 2, -1};
-    math::v3f initialCamerTarget = {0, 0, 0};
-    camera = MakeCamera(initialCameraPos, math::Normalize(initialCamerTarget - initialCameraPos), TO_RAD(60.f), (f32)APP_W/(f32)APP_H);
+    math::v3f initialCameraPos =
+    {
+        //TERRAIN_SIZE / 2.f,
+        //24.f,
+        //TERRAIN_SIZE / 2.f,
+        2, 24, 2
+    };
+    math::v3f initialCameraTarget = {0, 0, 0};
+    camera = MakeCamera(initialCameraPos, math::Normalize(initialCameraTarget - initialCameraPos), TO_RAD(60.f), (f32)APP_W/(f32)APP_H);
+
+    mem::SetContext(&generalHeap);
+    InitGrassSystem(hRenderTargetMain);
 
     input::SetMouseLock(true);
     input::SetMouseHide(true);
@@ -231,6 +243,9 @@ void AppInit()
 
 void AppShutdown()
 {
+    mem::SetContext(&generalHeap);
+    ShutdownGrassSystem();
+
     egui::Shutdown();
     render::Shutdown();
     render::DestroyWindow(&window);
@@ -238,7 +253,7 @@ void AppShutdown()
     mem::DestroyHeapAllocator(&generalHeap);
 }
 
-void AppUpdate()
+void AppUpdate(i32 frame)
 {
     window.PollMessages();
     // TODO(caio): Set camera movement
@@ -257,11 +272,13 @@ void AppUpdate()
     if(input::IsKeyDown(input::KEY_D)) cameraInputPos.x += 1;
     math::v2f cameraInputRot = input::GetMouseDelta();
     //cameraInputRot.x *= -1.f;
-    RotateCamera(camera, cameraInputRot, TO_RAD(360.f) * 2.f, dt);
+    RotateCamera(camera, cameraInputRot, TO_RAD(360.f), dt);
     MoveCamera(camera, cameraInputPos, 5.f, dt);
 
     constantsTerrain.view = math::Transpose(camera.GetView());
     constantsTerrain.proj = math::Transpose(camera.GetProjection());
+
+    PopulateGrassInstances(frame, TERRAIN_SIZE, &camera);
 }
 
 void AppRender(i32 frame)
@@ -284,7 +301,7 @@ void AppRender(i32 frame)
     barrier.srcAccess = render::MEMORY_ACCESS_TRANSFER_WRITE;
     barrier.dstAccess = render::MEMORY_ACCESS_COLOR_OUTPUT_WRITE;
     barrier.srcStage = render::PIPELINE_STAGE_TRANSFER;
-    barrier.dstStage = render::PIPELINE_STAGE_FRAGMENT_SHADER;
+    barrier.dstStage = render::PIPELINE_STAGE_COLOR_OUTPUT;
     render::CmdPipelineBarrierTextureLayout(hCmd, render::GetColorOutput(hRenderTargetMain, 0), render::IMAGE_LAYOUT_COLOR_OUTPUT, barrier);
 
     // Render terrain
@@ -318,6 +335,9 @@ void AppRender(i32 frame)
 #endif
     render::EndRenderPass(hCmd, hRenderPassMain);
 
+    UploadGrassInstances(frame);
+    RenderGrassInstances(hCmd, frame, &camera);
+
     // Render GUI
     render::BeginRenderPass(hCmd, hRenderPassUI);
     egui::DrawFrame(hCmd);
@@ -339,9 +359,11 @@ void AppRender(i32 frame)
 }
 
 };  // namespace Grass
+};  // namespace ty
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, PWSTR pCmdLine, int nCmdShow)
 {
+    using namespace ty;
     using namespace Grass;
 
     AppInit();
@@ -349,7 +371,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, PWSTR pCmdLine, int nC
     while(window.state != render::WINDOW_CLOSED)
     {
         frameTimer.Start();
-        AppUpdate();
+        AppUpdate(frame);
         AppRender(frame);
         frameTimer.Stop();
         dt = (f32)frameTimer.GetElapsedS();

@@ -1,9 +1,10 @@
 #pragma once
 #include "engine/src/core/math.hpp"
 
+namespace ty
+{
 namespace Grass
 {
-using namespace ty;
 
 struct Camera
 {
@@ -25,4 +26,5 @@ Camera MakeCamera(math::v3f pos, math::v3f facing, f32 fov, f32 aspect);
 void MoveCamera(Camera& cam, math::v3f moveInput, f32 speed, f32 dt);
 void RotateCamera(Camera& cam, math::v2f rotateInput, f32 angularVelocity, f32 dt);
 
-};
+};  // namespace Grass
+};  // namespace ty
