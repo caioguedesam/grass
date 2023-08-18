@@ -231,7 +231,8 @@ void AppInit()
         //TERRAIN_SIZE / 2.f,
         2, 24, 2
     };
-    math::v3f initialCameraTarget = {0, 0, 0};
+    //math::v3f initialCameraTarget = {0, 0, 0};
+    math::v3f initialCameraTarget = {TERRAIN_SIZE, 0, TERRAIN_SIZE};
     camera = MakeCamera(initialCameraPos, math::Normalize(initialCameraTarget - initialCameraPos), TO_RAD(60.f), (f32)APP_W/(f32)APP_H);
 
     mem::SetContext(&generalHeap);
@@ -272,13 +273,13 @@ void AppUpdate(i32 frame)
     if(input::IsKeyDown(input::KEY_D)) cameraInputPos.x += 1;
     math::v2f cameraInputRot = input::GetMouseDelta();
     //cameraInputRot.x *= -1.f;
-    RotateCamera(camera, cameraInputRot, TO_RAD(360.f), dt);
+    RotateCamera(camera, cameraInputRot, TO_RAD(360.f) / 4.f, dt);
     MoveCamera(camera, cameraInputPos, 5.f, dt);
 
     constantsTerrain.view = math::Transpose(camera.GetView());
     constantsTerrain.proj = math::Transpose(camera.GetProjection());
 
-    PopulateGrassInstances(frame, TERRAIN_SIZE, &camera);
+    //PopulateGrassInstances(frame, TERRAIN_SIZE, &camera);
 }
 
 void AppRender(i32 frame)
@@ -335,8 +336,9 @@ void AppRender(i32 frame)
 #endif
     render::EndRenderPass(hCmd, hRenderPassMain);
 
-    UploadGrassInstances(frame);
-    RenderGrassInstances(hCmd, frame, &camera);
+    //UploadGrassInstances(frame);
+    //RenderGrassInstances(hCmd, frame, &camera);
+    RenderGrassInstances(hCmd, &camera);
 
     // Render GUI
     render::BeginRenderPass(hCmd, hRenderPassUI);

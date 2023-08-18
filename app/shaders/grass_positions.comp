@@ -1,0 +1,44 @@
+#version 460 core
+
+layout(push_constant) uniform uConstantBlock
+{
+    uint terrainSize;
+    uint maxGrassBladeCount;
+} uConstants;
+
+struct GrassInstanceData
+{
+    vec3 position;
+};
+
+layout(std140, set = 0, binding = 0) buffer InstanceDataBlock
+{
+    GrassInstanceData data[];
+} uInstances;
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+//layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+void main()
+{
+    //uint iid = gl_GlobalInvocationID.x;
+
+    //// bladesPerSide x bladesPerSide total blades
+    uint bladesPerSide = uint(sqrt(uConstants.maxGrassBladeCount));
+    float spacingPerBlade = float(uConstants.terrainSize) / float(bladesPerSide);
+
+    //uint gridX = iid / bladesPerSide;
+    //uint gridY = iid % bladesPerSide;
+
+    uint gridX = gl_GlobalInvocationID.x;
+    uint gridY = gl_GlobalInvocationID.y;
+    uint iid = gridX * bladesPerSide + gridY;
+
+    vec3 instancePosition =
+        vec3(
+         spacingPerBlade * gridX,
+         0,
+         spacingPerBlade * gridY
+        );
+    uInstances.data[iid].position = instancePosition;
+}
