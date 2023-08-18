@@ -13,8 +13,8 @@ namespace ty
 namespace Grass
 {
 
-const i32 maxGrassInstances = 256 * 256 * 16;
-//const i32 maxGrassInstances = 256;
+//const i32 maxGrassInstances = 256 * 256 * 16;
+const i32 maxGrassInstances = 256 * 256;
 struct GrassPositionConstantBlock
 {
     u32 terrainSize = 0;
@@ -25,12 +25,23 @@ struct GrassInstanceDataBlock
 {
     math::v3f position = {};
     f32 padding0 = 0;
+    math::v2f uv = {};
+    f32 padding1[2];
+};
+
+struct GrassRenderUniformBlock
+{
+    //TODO(caio): Grass density. Use a value here instead of on constant block, which can be tweaked at runtime
+    f32 windTiling = 1;
+    f32 windStrength = 1;
 };
 
 struct GrassRenderConstantBlock
 {
     math::m4f view = {};
     math::m4f proj = {};
+    f32 worldTime = 0;
+    f32 deltaTime = 0;
 };
 
 //inline Array<GrassInstanceDataBlock> grassInstanceData;
@@ -41,6 +52,7 @@ inline Handle<asset::Model> hAssetModelGrass;
 inline Handle<asset::Shader> hAssetCsGrassPositions;
 inline Handle<asset::Shader> hAssetVsGrass;
 inline Handle<asset::Shader> hAssetPsGrass;
+inline Handle<asset::Image> hAssetWindNoise;
 
 // Render resources
 inline Handle<render::Shader> hCsGrassPositions;
@@ -49,6 +61,11 @@ inline Handle<render::Shader> hPsGrass;
 inline Handle<render::Buffer> hVbGrass;
 inline Handle<render::Buffer> hIbGrass;
 inline Handle<render::Buffer> hSbGrassInstanceData;
+inline GrassRenderUniformBlock grassRenderUniforms;
+inline Handle<render::Buffer> hUbGrassRenderUniforms;
+inline Handle<render::Texture> hTexWindNoise;
+inline Handle<render::Buffer> hStagingTexWindNoise;
+inline Handle<render::Sampler> hSamplerLinear; //TODO(caio): Move this out of here to utils file
 
 // Grass position compute
 inline Handle<render::ResourceSetLayout> hResourceLayoutGrassPositions;
@@ -69,7 +86,7 @@ void InitGrassPositions();
 
 //void PopulateGrassInstances(i32 frame, f32 terrainSize, Camera* camera);
 //void UploadGrassInstances(i32 frame);
-void RenderGrassInstances(Handle<render::CommandBuffer> hCmd,/* i32 frame,*/ Camera* camera);
+void RenderGrassInstances(Handle<render::CommandBuffer> hCmd, Camera* camera, f32 worldTime, f32 dt);
 
 };  // namespace Grass
 };  // namespace ty

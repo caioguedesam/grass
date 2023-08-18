@@ -125,7 +125,9 @@ mem::HeapAllocator generalHeap = {};
 Camera camera = {};
 
 i32 frame = 0;
+f32 worldTime = 0;
 f32 dt = 0;
+time::Timer worldTimer = {};
 time::Timer frameTimer = {};
 
 void InitShader(render::ShaderType type, file::Path assetPath, Handle<asset::Shader>* handle, Handle<render::Shader>* resource)
@@ -274,7 +276,7 @@ void AppUpdate(i32 frame)
     math::v2f cameraInputRot = input::GetMouseDelta();
     //cameraInputRot.x *= -1.f;
     RotateCamera(camera, cameraInputRot, TO_RAD(360.f) / 4.f, dt);
-    MoveCamera(camera, cameraInputPos, 5.f, dt);
+    MoveCamera(camera, cameraInputPos, 50.f, dt);
 
     constantsTerrain.view = math::Transpose(camera.GetView());
     constantsTerrain.proj = math::Transpose(camera.GetProjection());
@@ -324,24 +326,24 @@ void AppRender(i32 frame)
     render::CmdBindVertexBuffer(hCmd, hVbAxisZ);
     render::CmdDrawIndexed(hCmd, hIbAxis, 1);
 
-    SStr(debugStr, 2048);
-    str::Format(debugStr, "Camera position: %.2f\t%.2f\t%.2f", camera.position.x, camera.position.y, camera.position.z);
-    egui::Text(debugStr);
-    str::Format(debugStr, "Camera axisX: %.2f\t%.2f\t%.2f", camera.axisRight.x, camera.axisRight.y, camera.axisRight.z);
-    egui::Text(debugStr);
-    str::Format(debugStr, "Camera axisY: %.2f\t%.2f\t%.2f", camera.axisUp.x, camera.axisUp.y, camera.axisUp.z);
-    egui::Text(debugStr);
-    str::Format(debugStr, "Camera axisZ: %.2f\t%.2f\t%.2f", camera.axisFront.x, camera.axisFront.y, camera.axisFront.z);
-    egui::Text(debugStr);
 #endif
     render::EndRenderPass(hCmd, hRenderPassMain);
 
     //UploadGrassInstances(frame);
     //RenderGrassInstances(hCmd, frame, &camera);
-    RenderGrassInstances(hCmd, &camera);
+    RenderGrassInstances(hCmd, &camera, worldTime, dt);
 
     // Render GUI
     render::BeginRenderPass(hCmd, hRenderPassUI);
+    //SStr(debugStr, 2048);
+    //str::Format(debugStr, "Camera position: %.2f\t%.2f\t%.2f", camera.position.x, camera.position.y, camera.position.z);
+    //egui::Text(debugStr);
+    //str::Format(debugStr, "Camera axisX: %.2f\t%.2f\t%.2f", camera.axisRight.x, camera.axisRight.y, camera.axisRight.z);
+    //egui::Text(debugStr);
+    //str::Format(debugStr, "Camera axisY: %.2f\t%.2f\t%.2f", camera.axisUp.x, camera.axisUp.y, camera.axisUp.z);
+    //egui::Text(debugStr);
+    //str::Format(debugStr, "Camera axisZ: %.2f\t%.2f\t%.2f", camera.axisFront.x, camera.axisFront.y, camera.axisFront.z);
+    //egui::Text(debugStr);
     egui::DrawFrame(hCmd);
     render::EndRenderPass(hCmd, hRenderPassUI);
     //render::EndRenderPass(hCmd, hRenderPassMain);
@@ -370,11 +372,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, PWSTR pCmdLine, int nC
 
     AppInit();
 
+    worldTimer.Start();
     while(window.state != render::WINDOW_CLOSED)
     {
         frameTimer.Start();
         AppUpdate(frame);
         AppRender(frame);
+        worldTimer.Stop();
+        worldTime = (f32)worldTimer.GetElapsedS();
         frameTimer.Stop();
         dt = (f32)frameTimer.GetElapsedS();
         frame++;

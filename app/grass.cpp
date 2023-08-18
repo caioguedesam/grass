@@ -70,6 +70,58 @@ void InitGrassSystem(Handle<render::RenderTarget> hRenderTarget)
             sizeof(GrassInstanceDataBlock) * maxGrassInstances, 
             sizeof(GrassInstanceDataBlock) * maxGrassInstances);
 
+    grassRenderUniforms = {};
+    grassRenderUniforms.windTiling = 0.1f;
+    grassRenderUniforms.windStrength = 3.f;
+    hUbGrassRenderUniforms = render::MakeBuffer(render::BUFFER_TYPE_UNIFORM, sizeof(GrassRenderUniformBlock), sizeof(GrassRenderUniformBlock), &grassRenderUniforms);
+
+    // MAKING WIND TEXTURE
+    // //TODO(caio): ABSTRACT THIS LATER
+    hAssetWindNoise = asset::LoadImageFile(file::MakePath(IStr("resources/textures/wind_noise.png")));
+    asset::Image& assetWindNoise = asset::images[hAssetWindNoise];
+    //TODO(caio): Move this staging process somewhere else for more general functions
+    u64 imageSize = assetWindNoise.width * assetWindNoise.height * assetWindNoise.channels;
+    hStagingTexWindNoise = render::MakeBuffer(render::BUFFER_TYPE_STAGING, 
+            imageSize, 
+            imageSize,
+            assetWindNoise.data);
+    render::TextureDesc texWindNoiseDesc = {};
+    texWindNoiseDesc.type = render::IMAGE_TYPE_2D;
+    texWindNoiseDesc.width = assetWindNoise.width;
+    texWindNoiseDesc.height = assetWindNoise.height;
+    texWindNoiseDesc.mipLevels = render::GetMaxMipLevels(assetWindNoise.width, assetWindNoise.height);
+    //TODO(caio): This should likely be 1 channel alpha? Instead of 4 channels rgba
+    texWindNoiseDesc.format = render::FORMAT_RGBA8_SRGB;
+    texWindNoiseDesc.usageFlags = ENUM_FLAGS(render::ImageUsageFlags,
+            render::IMAGE_USAGE_SAMPLED | render::IMAGE_USAGE_TRANSFER_DST);
+    hTexWindNoise = render::MakeTexture(texWindNoiseDesc);
+
+    Handle<render::CommandBuffer> hCmd = render::GetAvailableCommandBuffer(render::COMMAND_BUFFER_IMMEDIATE);
+    render::BeginCommandBuffer(hCmd);
+    render::Barrier barrier = {};
+    barrier.srcAccess = render::MEMORY_ACCESS_NONE;
+    barrier.dstAccess = render::MEMORY_ACCESS_TRANSFER_WRITE;
+    barrier.srcStage = render::PIPELINE_STAGE_TOP;
+    barrier.dstStage = render::PIPELINE_STAGE_TRANSFER;
+    render::CmdPipelineBarrierTextureLayout(hCmd, 
+            hTexWindNoise, 
+            render::IMAGE_LAYOUT_TRANSFER_DST, 
+            barrier);
+    render::CmdCopyBufferToTexture(hCmd, hStagingTexWindNoise, hTexWindNoise);
+    barrier.srcAccess = render::MEMORY_ACCESS_TRANSFER_WRITE;
+    barrier.dstAccess = render::MEMORY_ACCESS_SHADER_READ;
+    barrier.srcStage = render::PIPELINE_STAGE_TRANSFER;
+    barrier.dstStage = render::PIPELINE_STAGE_VERTEX_SHADER;
+    render::CmdPipelineBarrierTextureLayout(hCmd, 
+            hTexWindNoise, 
+            render::IMAGE_LAYOUT_SHADER_READ_ONLY, 
+            barrier);
+    render::EndCommandBuffer(hCmd);
+    render::SubmitImmediate(hCmd);
+
+    render::SamplerDesc samplerLinearDesc = {};
+    hSamplerLinear = render::MakeSampler(samplerLinearDesc);
+
     render::VertexAttribute vertexAttributesGrass[] =
     {
         render::VERTEX_ATTR_V3F,
@@ -90,7 +142,6 @@ void InitGrassSystem(Handle<render::RenderTarget> hRenderTarget)
     render::ResourceSetLayout::Entry grassPositionsResourceLayoutEntries[] =
     {
         {
-            //.resourceType = render::RESOURCE_DYNAMIC_STORAGE_BUFFER,
             .resourceType = render::RESOURCE_STORAGE_BUFFER,
             .shaderStages = render::SHADER_TYPE_COMPUTE
         },
@@ -101,7 +152,6 @@ void InitGrassSystem(Handle<render::RenderTarget> hRenderTarget)
     {
         {
             .binding = 0,
-            //.resourceType = render::RESOURCE_DYNAMIC_STORAGE_BUFFER,
             .resourceType = render::RESOURCE_STORAGE_BUFFER,
             .hBuffer = hSbGrassInstanceData
         },
@@ -113,8 +163,15 @@ void InitGrassSystem(Handle<render::RenderTarget> hRenderTarget)
     render::ResourceSetLayout::Entry grassRenderResourceLayoutEntries[] =
     {
         {
-            //.resourceType = render::RESOURCE_DYNAMIC_STORAGE_BUFFER,
             .resourceType = render::RESOURCE_STORAGE_BUFFER,
+            .shaderStages = render::SHADER_TYPE_VERTEX
+        },
+        {
+            .resourceType = render::RESOURCE_UNIFORM_BUFFER,
+            .shaderStages = render::SHADER_TYPE_VERTEX
+        },
+        {
+            .resourceType = render::RESOURCE_SAMPLED_TEXTURE,
             .shaderStages = render::SHADER_TYPE_VERTEX
         },
     };
@@ -124,9 +181,19 @@ void InitGrassSystem(Handle<render::RenderTarget> hRenderTarget)
     {
         {
             .binding = 0,
-            //.resourceType = render::RESOURCE_DYNAMIC_STORAGE_BUFFER,
             .resourceType = render::RESOURCE_STORAGE_BUFFER,
             .hBuffer = hSbGrassInstanceData
+        },
+        {
+            .binding = 1,
+            .resourceType = render::RESOURCE_UNIFORM_BUFFER,
+            .hBuffer = hUbGrassRenderUniforms
+        },
+        {
+            .binding = 2,
+            .resourceType = render::RESOURCE_SAMPLED_TEXTURE,
+            .hTexture = hTexWindNoise,
+            .hSampler = hSamplerLinear
         },
     };
     hResourceSetGrassRender = render::MakeResourceSet(hResourceLayoutGrassRender, 
@@ -190,45 +257,16 @@ void InitGrassPositions()
     LOGLF("GRASS", "InitGrassPositions: %.4f ms", timer.GetElapsedMS());
 }
 
-//void PopulateGrassInstances(i32 frame, f32 terrainSize, Camera* camera)
-//{
-    //i32 frameOffset = (frame % RENDER_CONCURRENT_FRAMES) * maxGrassInstances;
 
-    //i32 grassInstancesPerSide = sqrtf(maxGrassInstances);
-    //f32 step = terrainSize / (f32)grassInstancesPerSide;
-    //for(i32 x = 0; x < grassInstancesPerSide; x++)
-    //{
-        //for(i32 y = 0; y < grassInstancesPerSide; y++)
-        //{
-            //GrassInstanceDataBlock instanceData = {};
-            //instanceData.position =
-            //{
-                //step * x,
-                //0,
-                //step * y,
-            //};
-            //i32 instanceIndex = x * grassInstancesPerSide + y + frameOffset;
-            //grassInstanceData[instanceIndex] = instanceData;
-        //}
-    //}
-
-//}
-
-//void UploadGrassInstances(i32 frame)
-//{
-    //u64 grassDataOffset = (frame % RENDER_CONCURRENT_FRAMES) * maxGrassInstances * sizeof(GrassInstanceDataBlock);
-    //u64 grassDataSize = maxGrassInstances * sizeof(GrassInstanceDataBlock);
-    //void* grassDataStart = (void*)((u64)grassInstanceData.data + grassDataOffset);
-    //render::CopyMemoryToBuffer(hSbGrassInstanceData, grassDataOffset, grassDataSize, grassDataStart);
-//}
-
-void RenderGrassInstances(Handle<render::CommandBuffer> hCmd,/* i32 frame,*/ Camera* camera)
+void RenderGrassInstances(Handle<render::CommandBuffer> hCmd, Camera* camera, f32 worldTime, f32 dt)
 {
     render::BeginRenderPass(hCmd, hRenderPassGrassRender);
     render::CmdBindGraphicsPipeline(hCmd, hGraphicsPipelineGrass);
     GrassRenderConstantBlock constants = {};
     constants.view = math::Transpose(camera->GetView());
     constants.proj = math::Transpose(camera->GetProjection());
+    constants.worldTime = worldTime;
+    constants.deltaTime = dt;
     render::CmdUpdatePushConstantRange(hCmd, 0, &constants, hGraphicsPipelineGrass);
     render::CmdSetViewport(hCmd, hRenderPassGrassRender);
     render::CmdSetScissor(hCmd, hRenderPassGrassRender);
