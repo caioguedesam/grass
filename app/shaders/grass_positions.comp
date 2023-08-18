@@ -19,16 +19,17 @@ layout(std140, set = 0, binding = 0) buffer InstanceDataBlock
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 //layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
+float random(vec2 st)
+{
+    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+}
+
 void main()
 {
-    //uint iid = gl_GlobalInvocationID.x;
 
-    //// bladesPerSide x bladesPerSide total blades
+    // bladesPerSide x bladesPerSide total blades
     uint bladesPerSide = uint(sqrt(uConstants.maxGrassBladeCount));
     float spacingPerBlade = float(uConstants.terrainSize) / float(bladesPerSide);
-
-    //uint gridX = iid / bladesPerSide;
-    //uint gridY = iid % bladesPerSide;
 
     uint gridX = gl_GlobalInvocationID.x;
     uint gridY = gl_GlobalInvocationID.y;
@@ -36,9 +37,9 @@ void main()
 
     vec3 instancePosition =
         vec3(
-         spacingPerBlade * gridX,
+         spacingPerBlade * gridX + spacingPerBlade * random(vec2(gridX, gridY)),
          0,
-         spacingPerBlade * gridY
+         spacingPerBlade * gridY + spacingPerBlade * random(vec2(gridY, gridX))
         );
     uInstances.data[iid].position = instancePosition;
 }
