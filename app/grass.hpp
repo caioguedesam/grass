@@ -13,7 +13,6 @@ namespace ty
 namespace Grass
 {
 
-//const i32 maxGrassInstances = 256 * 256 * 16;
 const i32 maxGrassInstances = 256 * 256;
 struct GrassPositionConstantBlock
 {
@@ -44,8 +43,6 @@ struct GrassRenderConstantBlock
     f32 deltaTime = 0;
 };
 
-//inline Array<GrassInstanceDataBlock> grassInstanceData;
-inline GrassRenderConstantBlock grassPassConstants;
 
 // Assets
 inline Handle<asset::Model> hAssetModelGrass;
@@ -61,11 +58,11 @@ inline Handle<render::Shader> hPsGrass;
 inline Handle<render::Buffer> hVbGrass;
 inline Handle<render::Buffer> hIbGrass;
 inline Handle<render::Buffer> hSbGrassInstanceData;
+inline GrassRenderConstantBlock grassRenderConstants;
 inline GrassRenderUniformBlock grassRenderUniforms;
 inline Handle<render::Buffer> hUbGrassRenderUniforms;
 inline Handle<render::Texture> hTexWindNoise;
 inline Handle<render::Buffer> hStagingTexWindNoise;
-inline Handle<render::Sampler> hSamplerLinear; //TODO(caio): Move this out of here to utils file
 
 // Grass position compute
 inline Handle<render::ResourceSetLayout> hResourceLayoutGrassPositions;
@@ -77,16 +74,14 @@ inline Handle<render::VertexLayout> hVertexLayoutGrassRender;
 inline Handle<render::RenderPass> hRenderPassGrassRender;
 inline Handle<render::ResourceSetLayout> hResourceLayoutGrassRender;
 inline Handle<render::ResourceSet> hResourceSetGrassRender;
-inline Handle<render::GraphicsPipeline> hGraphicsPipelineGrass;
+inline Handle<render::GraphicsPipeline> hGraphicsPipelineGrassRender;
 
-void InitGrassSystem(Handle<render::RenderTarget> hRenderTarget);
-void ShutdownGrassSystem();
+void InitGrass(Handle<render::RenderTarget> hRenderTarget);
+void ShutdownGrass();
 
 void InitGrassPositions();
 
-//void PopulateGrassInstances(i32 frame, f32 terrainSize, Camera* camera);
-//void UploadGrassInstances(i32 frame);
-void RenderGrassInstances(Handle<render::CommandBuffer> hCmd, Camera* camera, f32 worldTime, f32 dt);
+void RenderGrassInstances(Handle<render::CommandBuffer> hCmd);
 
 };  // namespace Grass
 };  // namespace ty

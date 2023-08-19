@@ -1,3 +1,4 @@
+#include "app/render_utils.hpp"
 #include "engine/src/core/base.hpp"
 #include "engine/src/core/debug.hpp"
 #include "engine/src/core/profile.hpp"
@@ -14,25 +15,24 @@
 #include "engine/src/render/render.hpp"
 #include "engine/src/render/egui.hpp"
 
-#include "app/camera.hpp"
+#include "app/terrain.hpp"
 #include "app/grass.hpp"
 
 // Single compilation unit
 #include "app/camera.cpp"
+#include "app/state.cpp"
+#include "app/render_utils.cpp"
+#include "app/terrain.cpp"
 #include "app/grass.cpp"
 
 // TODO_LIST:
 // App:
-// - Move all to GPU
+// - Refactoring
 // - ...
 // Engine:
 // - Indirect draw for GPU driven rendering
 // - Persistent buffer mapping
 
-#define SHADER_PATH "./app/shaders/"
-
-#define APP_W 1920
-#define APP_H 1080
 #define TERRAIN_SIZE 256
 
 namespace ty
@@ -40,164 +40,36 @@ namespace ty
 namespace Grass
 {
 
-#define COORD_DEBUG 0
-// App data
-#if COORD_DEBUG
-// Debug unlit rects for coordinate system testing
-f32 xAxisQuadData[] =
-{
-    0, 0, 0,    0, 1, 0, 0, 0,
-    1, 0, 0,    0, 1, 0, 0, 0,
-    1, 0, 0.2f, 0, 1, 0, 0, 0,
-    0, 0, 0.2f, 0, 1, 0, 0, 0,
-};
-
-f32 yAxisQuadData[] =
-{
-    0, 0, 0,    0, 1, 0, 0, 0,
-    0.2f, 0, 0, 0, 1, 0, 0, 0,
-    0.2f, 1, 0, 0, 1, 0, 0, 0,
-    0, 1, 0,    0, 1, 0, 0, 0,
-};
-
-f32 zAxisQuadData[] =
-{
-    0, 0, 0,    0, 1, 0, 0, 0,
-    0.2f, 0, 0, 0, 1, 0, 0, 0,
-    0.2f, 0, 1, 0, 1, 0, 0, 0,
-    0, 0, 1,    0, 1, 0, 0, 0,
-};
-
-u32 axisQuadIndices[] =
-{
-    0, 1, 2, 0, 2, 3,
-};
-#endif
-
-// Base terrain quad on x-z plane
-f32 terrainQuadData[] =
-{
-    // position (x, y, z), normal (x, y, z), uv (u, v)
-    0 * TERRAIN_SIZE, 0.f, 0 * TERRAIN_SIZE,  0.f, 1.f, 0.f, 0.f, 0.f,
-    1 * TERRAIN_SIZE, 0.f, 0 * TERRAIN_SIZE,   0.f, 1.f, 0.f, 0.f, 0.f,
-    1 * TERRAIN_SIZE, 0.f, 1 * TERRAIN_SIZE,    0.f, 1.f, 0.f, 0.f, 0.f,
-    0 * TERRAIN_SIZE, 0.f, 1 * TERRAIN_SIZE,   0.f, 1.f, 0.f, 0.f, 0.f,
-};
-
-u32 terrainQuadIndices[] =
-{
-    0, 1, 2, 0, 2, 3,
-};
-
-// App assets
-Handle<asset::Shader> hAssetVsTerrain;
-Handle<asset::Shader> hAssetPsTerrain;
-
-// App resources
-Handle<render::Shader> hVsTerrain;
-Handle<render::Shader> hPsTerrain;
-Handle<render::Buffer> hVbTerrain;
-Handle<render::Buffer> hIbTerrain;
-#if COORD_DEBUG
-Handle<render::Buffer> hIbAxis;
-Handle<render::Buffer> hVbAxisX;
-Handle<render::Buffer> hVbAxisY;
-Handle<render::Buffer> hVbAxisZ;
-#endif
-
-struct ConstantBlockTerrain
-{
-    math::m4f view = {};
-    math::m4f proj = {};
-};
-ConstantBlockTerrain constantsTerrain;
-
-// App render pipeline
-Handle<render::RenderTarget> hRenderTargetMain;
-Handle<render::RenderPass> hRenderPassMain;
-Handle<render::RenderPass> hRenderPassUI;
-Handle<render::VertexLayout> hVertexLayoutTerrain;
-Handle<render::GraphicsPipeline> hPipelineTerrain;
-
-// App global state
 render::Window window = {};
-mem::HeapAllocator generalHeap = {};
-Camera camera = {};
-
-i32 frame = 0;
-f32 worldTime = 0;
-f32 dt = 0;
-time::Timer worldTimer = {};
-time::Timer frameTimer = {};
-
-void InitShader(render::ShaderType type, file::Path assetPath, Handle<asset::Shader>* handle, Handle<render::Shader>* resource)
-{
-    ASSERT(handle && resource);
-    *handle = asset::LoadShader(assetPath);
-    asset::Shader& assetShader = asset::shaders[*handle];
-    *resource = render::MakeShader(type, assetShader.size, assetShader.data);
-}
+Handle<render::RenderTarget> hRenderTargetMain;
+Handle<render::RenderPass> hRenderPassUI;
 
 void AppInit()
 {
-    // Systems
+    // Engine system initialization
     time::Init();
     input::Init();
     asset::Init();
 
-    render::MakeWindow(&window, APP_W, APP_H, "Grass");
+    render::MakeWindow(&window, appWidth, appHeight, "Grass");
     render::Init(&window);
 
-    generalHeap = mem::MakeHeapAllocator(GB(1));
+    // Default state
+    InitState();
+    InitDefaultRenderResources();
 
-    // Assets and resources
-    InitShader(render::SHADER_TYPE_VERTEX, file::MakePath(IStr(SHADER_PATH"terrain.vert")), &hAssetVsTerrain, &hVsTerrain);
-    InitShader(render::SHADER_TYPE_PIXEL, file::MakePath(IStr(SHADER_PATH"terrain.frag")), &hAssetPsTerrain, &hPsTerrain);
-    hVbTerrain = render::MakeBuffer(render::BUFFER_TYPE_VERTEX,
-            ARR_LEN(terrainQuadData) * sizeof(f32),
-            sizeof(f32),
-            terrainQuadData);
-    hIbTerrain = render::MakeBuffer(render::BUFFER_TYPE_INDEX,
-            ARR_LEN(terrainQuadIndices) * sizeof(u32),
-            sizeof(u32),
-            terrainQuadIndices);
-#if COORD_DEBUG
-    hIbAxis = render::MakeBuffer(render::BUFFER_TYPE_INDEX,
-            ARR_LEN(axisQuadIndices) * sizeof(u32),
-            sizeof(u32),
-            axisQuadIndices);
-    hVbAxisX = render::MakeBuffer(render::BUFFER_TYPE_VERTEX,
-            ARR_LEN(xAxisQuadData) * sizeof(f32),
-            sizeof(f32),
-            xAxisQuadData);
-    hVbAxisY = render::MakeBuffer(render::BUFFER_TYPE_VERTEX,
-            ARR_LEN(yAxisQuadData) * sizeof(f32),
-            sizeof(f32),
-            yAxisQuadData);
-    hVbAxisZ = render::MakeBuffer(render::BUFFER_TYPE_VERTEX,
-            ARR_LEN(zAxisQuadData) * sizeof(f32),
-            sizeof(f32),
-            zAxisQuadData);
-#endif
-    
     // Render outputs
     render::RenderTargetDesc renderTargetMainDesc = {};
-    renderTargetMainDesc.width = APP_W;
-    renderTargetMainDesc.height = APP_H;
+    renderTargetMainDesc.width = appWidth;
+    renderTargetMainDesc.height = appHeight;
     renderTargetMainDesc.colorImageCount = 1;
     renderTargetMainDesc.colorImageFormats[0] = render::FORMAT_RGBA8_SRGB;
     renderTargetMainDesc.depthImageFormat = render::FORMAT_D32_FLOAT;
     hRenderTargetMain = render::MakeRenderTarget(renderTargetMainDesc);
 
-    // Render pipeline
-    render::RenderPassDesc renderPassMainDesc = {};
-    renderPassMainDesc.loadOp = render::LOAD_OP_LOAD;
-    renderPassMainDesc.storeOp = render::STORE_OP_STORE;
-    //renderPassMainDesc.initialLayout = render::IMAGE_LAYOUT_TRANSFER_DST;
-    //renderPassMainDesc.finalLayout = render::IMAGE_LAYOUT_TRANSFER_SRC;
-    renderPassMainDesc.initialLayout = render::IMAGE_LAYOUT_COLOR_OUTPUT;
-    renderPassMainDesc.finalLayout = render::IMAGE_LAYOUT_COLOR_OUTPUT;
-    hRenderPassMain = render::MakeRenderPass(renderPassMainDesc, hRenderTargetMain);
+    // App systems
+    InitTerrain(hRenderTargetMain); 
+    InitGrass(hRenderTargetMain);
 
     render::RenderPassDesc renderPassUIDesc = {};
     renderPassUIDesc.loadOp = render::LOAD_OP_LOAD;
@@ -205,61 +77,27 @@ void AppInit()
     renderPassUIDesc.initialLayout = render::IMAGE_LAYOUT_COLOR_OUTPUT;
     renderPassUIDesc.finalLayout = render::IMAGE_LAYOUT_TRANSFER_SRC;
     hRenderPassUI = render::MakeRenderPass(renderPassUIDesc, hRenderTargetMain);
-
-    render::VertexAttribute vertexAttributesTerrain[] =
-    {
-        render::VERTEX_ATTR_V3F,
-        render::VERTEX_ATTR_V3F,
-        render::VERTEX_ATTR_V2F,
-    };
-    hVertexLayoutTerrain = render::MakeVertexLayout(ARR_LEN(vertexAttributesTerrain), vertexAttributesTerrain);
-
-    render::GraphicsPipelineDesc pipelineTerrainDesc = {};
-    pipelineTerrainDesc.hVertexLayout = hVertexLayoutTerrain;
-    pipelineTerrainDesc.hShaderVertex = hVsTerrain;
-    pipelineTerrainDesc.hShaderPixel = hPsTerrain;
-    pipelineTerrainDesc.pushConstantRangeCount = 1;
-    pipelineTerrainDesc.pushConstantRanges[0].offset = 0;
-    pipelineTerrainDesc.pushConstantRanges[0].size = sizeof(ConstantBlockTerrain);
-    pipelineTerrainDesc.pushConstantRanges[0].shaderStages = render::SHADER_TYPE_VERTEX;
-    hPipelineTerrain = render::MakeGraphicsPipeline(hRenderPassMain, pipelineTerrainDesc, 0, NULL);
-
     egui::Init(hRenderPassUI);
 
-    math::v3f initialCameraPos =
-    {
-        //TERRAIN_SIZE / 2.f,
-        //24.f,
-        //TERRAIN_SIZE / 2.f,
-        2, 24, 2
-    };
-    //math::v3f initialCameraTarget = {0, 0, 0};
-    math::v3f initialCameraTarget = {TERRAIN_SIZE, 0, TERRAIN_SIZE};
-    camera = MakeCamera(initialCameraPos, math::Normalize(initialCameraTarget - initialCameraPos), TO_RAD(60.f), (f32)APP_W/(f32)APP_H);
-
-    mem::SetContext(&generalHeap);
-    InitGrassSystem(hRenderTargetMain);
-
+    // App settings
     input::SetMouseLock(true);
     input::SetMouseHide(true);
 }
 
 void AppShutdown()
 {
-    mem::SetContext(&generalHeap);
-    ShutdownGrassSystem();
+    ShutdownGrass();
 
     egui::Shutdown();
     render::Shutdown();
     render::DestroyWindow(&window);
 
-    mem::DestroyHeapAllocator(&generalHeap);
+    mem::DestroyHeapAllocator(&appHeap);
 }
 
-void AppUpdate(i32 frame)
+void AppUpdate()
 {
     window.PollMessages();
-    // TODO(caio): Set camera movement
 
     input::Update();
     if(input::IsKeyDown(input::KEY_ESCAPE))
@@ -275,20 +113,15 @@ void AppUpdate(i32 frame)
     if(input::IsKeyDown(input::KEY_D)) cameraInputPos.x += 1;
     math::v2f cameraInputRot = input::GetMouseDelta();
     //cameraInputRot.x *= -1.f;
-    RotateCamera(camera, cameraInputRot, TO_RAD(360.f) / 4.f, dt);
-    MoveCamera(camera, cameraInputPos, 50.f, dt);
-
-    constantsTerrain.view = math::Transpose(camera.GetView());
-    constantsTerrain.proj = math::Transpose(camera.GetProjection());
-
-    //PopulateGrassInstances(frame, TERRAIN_SIZE, &camera);
+    RotateCamera(appCamera, cameraInputRot, TO_RAD(360.f) / 4.f, deltaTime);
+    MoveCamera(appCamera, cameraInputPos, 50.f, deltaTime);
 }
 
-void AppRender(i32 frame)
+void AppRender()
 {
     // Frame setup
-    Handle<render::CommandBuffer> hCmd = render::GetAvailableCommandBuffer(render::COMMAND_BUFFER_FRAME, frame);
-    render::BeginFrame(frame);
+    Handle<render::CommandBuffer> hCmd = render::GetAvailableCommandBuffer(render::COMMAND_BUFFER_FRAME, currentFrame);
+    render::BeginFrame(currentFrame);
     render::BeginCommandBuffer(hCmd);
     egui::BeginFrame();
 
@@ -307,31 +140,8 @@ void AppRender(i32 frame)
     barrier.dstStage = render::PIPELINE_STAGE_COLOR_OUTPUT;
     render::CmdPipelineBarrierTextureLayout(hCmd, render::GetColorOutput(hRenderTargetMain, 0), render::IMAGE_LAYOUT_COLOR_OUTPUT, barrier);
 
-    // Render terrain
-    render::BeginRenderPass(hCmd, hRenderPassMain);
-    render::CmdBindGraphicsPipeline(hCmd, hPipelineTerrain);
-    render::CmdUpdatePushConstantRange(hCmd, 0, &constantsTerrain, hPipelineTerrain);
-    render::CmdSetViewport(hCmd, hRenderPassMain);
-    render::CmdSetScissor(hCmd, hRenderPassMain);
-    render::CmdBindVertexBuffer(hCmd, hVbTerrain);
-    render::CmdBindIndexBuffer(hCmd, hIbTerrain);
-    render::CmdDrawIndexed(hCmd, hIbTerrain, 1);
-
-#if COORD_DEBUG
-    render::CmdBindIndexBuffer(hCmd, hIbAxis);
-    render::CmdBindVertexBuffer(hCmd, hVbAxisX);
-    render::CmdDrawIndexed(hCmd, hIbAxis, 1);
-    render::CmdBindVertexBuffer(hCmd, hVbAxisY);
-    render::CmdDrawIndexed(hCmd, hIbAxis, 1);
-    render::CmdBindVertexBuffer(hCmd, hVbAxisZ);
-    render::CmdDrawIndexed(hCmd, hIbAxis, 1);
-
-#endif
-    render::EndRenderPass(hCmd, hRenderPassMain);
-
-    //UploadGrassInstances(frame);
-    //RenderGrassInstances(hCmd, frame, &camera);
-    RenderGrassInstances(hCmd, &camera, worldTime, dt);
+    RenderTerrain(hCmd);
+    RenderGrassInstances(hCmd);
 
     // Render GUI
     render::BeginRenderPass(hCmd, hRenderPassUI);
@@ -346,7 +156,6 @@ void AppRender(i32 frame)
     //egui::Text(debugStr);
     egui::DrawFrame(hCmd);
     render::EndRenderPass(hCmd, hRenderPassUI);
-    //render::EndRenderPass(hCmd, hRenderPassMain);
 
     // Copy to swap chain image and end frame
     barrier.srcAccess = render::MEMORY_ACCESS_COLOR_OUTPUT_WRITE;
@@ -356,10 +165,10 @@ void AppRender(i32 frame)
     render::CmdPipelineBarrierTextureLayout(hCmd, render::GetColorOutput(hRenderTargetMain, 0), render::IMAGE_LAYOUT_TRANSFER_SRC, barrier);
     render::CmdCopyToSwapChain(hCmd, render::GetColorOutput(hRenderTargetMain, 0));
     render::EndCommandBuffer(hCmd);
-    render::EndFrame(frame, hCmd);
+    render::EndFrame(currentFrame, hCmd);
 
     // Present
-    render::Present(frame);
+    render::Present(currentFrame);
 }
 
 };  // namespace Grass
@@ -372,17 +181,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrev, PWSTR pCmdLine, int nC
 
     AppInit();
 
-    worldTimer.Start();
     while(window.state != render::WINDOW_CLOSED)
     {
-        frameTimer.Start();
-        AppUpdate(frame);
-        AppRender(frame);
-        worldTimer.Stop();
-        worldTime = (f32)worldTimer.GetElapsedS();
-        frameTimer.Stop();
-        dt = (f32)frameTimer.GetElapsedS();
-        frame++;
+        AppUpdate();
+        AppRender();
+        AdvanceState();
     }
 
     AppShutdown();
