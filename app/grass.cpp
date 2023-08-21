@@ -6,9 +6,11 @@
 #include "engine/src/core/math.hpp"
 #include "engine/src/core/time.hpp"
 #include "engine/src/render/render.hpp"
+#include "engine/src/render/egui.hpp"
 
 #include "app/state.hpp"
 #include "app/render_utils.hpp"
+#include "app/terrain.hpp"
 
 namespace ty
 {
@@ -39,10 +41,9 @@ void InitGrass(Handle<render::RenderTarget> hRenderTarget)
             sizeof(GrassInstanceDataBlock) * maxGrassInstances, 
             sizeof(GrassInstanceDataBlock) * maxGrassInstances);
 
-    grassRenderUniforms = {};
-    grassRenderUniforms.windTiling = 0.1f;
-    grassRenderUniforms.windStrength = 3.f;
-    hUbGrassRenderUniforms = render::MakeBuffer(render::BUFFER_TYPE_UNIFORM, sizeof(GrassRenderUniformBlock), sizeof(GrassRenderUniformBlock), &grassRenderUniforms);
+    grassConstants = {};
+    grassUniforms = {};
+    hUbGrass = render::MakeBuffer(render::BUFFER_TYPE_UNIFORM, sizeof(GrassUniformBlock), sizeof(GrassUniformBlock), &grassUniforms);
 
     render::VertexAttribute vertexAttributesGrass[] =
     {
@@ -59,12 +60,14 @@ void InitGrass(Handle<render::RenderTarget> hRenderTarget)
     renderPassGrassDesc.finalLayout = render::IMAGE_LAYOUT_COLOR_OUTPUT;
     hRenderPassGrassRender = render::MakeRenderPass(renderPassGrassDesc, hRenderTarget);
 
-    grassRenderConstants = {};
-
     render::ResourceSetLayout::Entry grassPositionsResourceLayoutEntries[] =
     {
         {
             .resourceType = render::RESOURCE_STORAGE_BUFFER,
+            .shaderStages = render::SHADER_TYPE_COMPUTE
+        },
+        {
+            .resourceType = render::RESOURCE_UNIFORM_BUFFER,
             .shaderStages = render::SHADER_TYPE_COMPUTE
         },
     };
@@ -76,6 +79,11 @@ void InitGrass(Handle<render::RenderTarget> hRenderTarget)
             .binding = 0,
             .resourceType = render::RESOURCE_STORAGE_BUFFER,
             .hBuffer = hSbGrassInstanceData
+        },
+        {
+            .binding = 1,
+            .resourceType = render::RESOURCE_UNIFORM_BUFFER,
+            .hBuffer = hUbGrass
         },
     };
     hResourceSetGrassPositions = render::MakeResourceSet(hResourceLayoutGrassPositions, 
@@ -109,7 +117,7 @@ void InitGrass(Handle<render::RenderTarget> hRenderTarget)
         {
             .binding = 1,
             .resourceType = render::RESOURCE_UNIFORM_BUFFER,
-            .hBuffer = hUbGrassRenderUniforms
+            .hBuffer = hUbGrass
         },
         {
             .binding = 2,
@@ -127,7 +135,7 @@ void InitGrass(Handle<render::RenderTarget> hRenderTarget)
     pipelineGrassPositionsDesc.pushConstantRanges[0] =
     {
         .offset = 0,
-        .size = sizeof(GrassPositionConstantBlock),
+        .size = sizeof(GrassConstantBlock),
         .shaderStages = render::SHADER_TYPE_COMPUTE,
     };
     pipelineGrassPositionsDesc.hShaderCompute = hCsGrassPositions;
@@ -141,7 +149,7 @@ void InitGrass(Handle<render::RenderTarget> hRenderTarget)
     pipelineGrassRenderDesc.pushConstantRanges[0] =
     {
         .offset = 0,
-        .size = sizeof(GrassRenderConstantBlock),
+        .size = sizeof(GrassConstantBlock),
         .shaderStages = render::SHADER_TYPE_VERTEX,
     };
     hGraphicsPipelineGrassRender = render::MakeGraphicsPipeline(hRenderPassGrassRender, pipelineGrassRenderDesc, 1, &hResourceLayoutGrassRender);
@@ -156,39 +164,47 @@ void ShutdownGrass()
 void InitGrassPositions()
 {
     // Submit once at init time to populate SSBO with all grass positions
+    // TODO(caio): For dynamic grass density, will need to populate these every frame
     Handle<render::CommandBuffer> hCmd = render::GetAvailableCommandBuffer(render::COMMAND_BUFFER_IMMEDIATE);
     render::BeginCommandBuffer(hCmd);
     render::CmdBindComputePipeline(hCmd, hComputePipelineGrassPositions);
-    GrassPositionConstantBlock constants = {};
-    //TODO(caio): Use this value from elsewhere...
-    constants.terrainSize = 256;
-    constants.maxGrassBladeCount = maxGrassInstances;
-    render::CmdUpdatePushConstantRange(hCmd, 0, &constants, hComputePipelineGrassPositions);
+    render::CmdUpdatePushConstantRange(hCmd, 0, &grassConstants, hComputePipelineGrassPositions);
     render::CmdBindComputeResources(hCmd, hComputePipelineGrassPositions, hResourceSetGrassPositions, 0);
-    const i32 bladesPerSide = (i32)(sqrt(maxGrassInstances));
-    const i32 localSizeX = 16;
-    const i32 localSizeY = 16;
+
+    i32 grassInstanceCount = grassUniforms.grassDensity * terrainConstants.terrainSize * terrainConstants.terrainSize;
+    i32 bladesPerSide = (i32)(sqrt(grassInstanceCount));
+    i32 localSizeX = 16;
+    i32 localSizeY = 16;
     render::CmdDispatch(hCmd, bladesPerSide/localSizeX, bladesPerSide/localSizeY, 1);
-    //render::CmdDispatch(hCmd, maxGrassInstances, 1, 1);
     render::EndCommandBuffer(hCmd);
-    time::Timer timer = {};
-    timer.Start();
     render::SubmitImmediate(hCmd);
-    timer.Stop();
-    LOGLF("GRASS", "InitGrassPositions: %.4f ms", timer.GetElapsedMS());
 }
 
+void UpdateGrassConstants()
+{
+    grassConstants.view = math::Transpose(appCamera.GetView());
+    grassConstants.proj = math::Transpose(appCamera.GetProjection());
+    grassConstants.worldTime = worldTime;
+    grassConstants.deltaTime = deltaTime;
+}
+
+void UpdateGrassUniforms()
+{
+    //TODO(caio): CONTINUE:
+    // - Grass density doesn't update at runtime, since positions are only initialized once.
+    // - Add color uniforms
+    // - Make more friendly GUI
+    egui::DragF32(IStr("Grass Density"), &grassUniforms.grassDensity, 0.1f, 0.1f, 10.f);
+    egui::SliderV2F(IStr("Wind Vector"), &grassUniforms.windDirection, -3.f, 3.f);
+    grassUniforms.terrainSize = terrainConstants.terrainSize;
+    render::CopyMemoryToBuffer(hUbGrass, 0, sizeof(GrassUniformBlock), &grassUniforms);
+}
 
 void RenderGrassInstances(Handle<render::CommandBuffer> hCmd)
 {
     render::BeginRenderPass(hCmd, hRenderPassGrassRender);
     render::CmdBindGraphicsPipeline(hCmd, hGraphicsPipelineGrassRender);
-    GrassRenderConstantBlock constants = {};
-    constants.view = math::Transpose(appCamera.GetView());
-    constants.proj = math::Transpose(appCamera.GetProjection());
-    constants.worldTime = worldTime;
-    constants.deltaTime = deltaTime;
-    render::CmdUpdatePushConstantRange(hCmd, 0, &constants, hGraphicsPipelineGrassRender);
+    render::CmdUpdatePushConstantRange(hCmd, 0, &grassConstants, hGraphicsPipelineGrassRender);
     render::CmdSetViewport(hCmd, hRenderPassGrassRender);
     render::CmdSetScissor(hCmd, hRenderPassGrassRender);
     render::CmdBindVertexBuffer(hCmd, hVbGrass);
@@ -197,15 +213,13 @@ void RenderGrassInstances(Handle<render::CommandBuffer> hCmd)
     //{
         //(frame % RENDER_CONCURRENT_FRAMES) * maxGrassInstances * (u32)sizeof(GrassInstanceDataBlock),
     //};
-    //render::CmdBindGraphicsResources(hCmd, 
-            //hGraphicsPipelineGrass, 
-            //hResourceSetGrassRender, 0,
-            //ARR_LEN(resourceDynamicOffsets), resourceDynamicOffsets);
     render::CmdBindGraphicsResources(hCmd, 
             hGraphicsPipelineGrassRender, 
             hResourceSetGrassRender, 0,
             0, NULL);
-    render::CmdDrawIndexed(hCmd, hIbGrass, maxGrassInstances);
+    //render::CmdDrawIndexed(hCmd, hIbGrass, maxGrassInstances);
+    i32 grassInstanceCount = grassUniforms.grassDensity * terrainConstants.terrainSize * terrainConstants.terrainSize;
+    render::CmdDrawIndexed(hCmd, hIbGrass, grassInstanceCount);
     render::EndRenderPass(hCmd, hRenderPassGrassRender);
 }
 

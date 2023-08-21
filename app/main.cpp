@@ -105,16 +105,23 @@ void AppUpdate()
         window.state = render::WINDOW_CLOSED;
         return;
     }
+    if(input::IsKeyJustDown(input::KEY_P))
+    {
+        input::ToggleMouseHide();
+        input::ToggleMouseLock();
+    }
 
-    math::v3f cameraInputPos = {0,0,0};
-    if(input::IsKeyDown(input::KEY_W)) cameraInputPos.z += 1;
-    if(input::IsKeyDown(input::KEY_S)) cameraInputPos.z -= 1;
-    if(input::IsKeyDown(input::KEY_A)) cameraInputPos.x -= 1;
-    if(input::IsKeyDown(input::KEY_D)) cameraInputPos.x += 1;
-    math::v2f cameraInputRot = input::GetMouseDelta();
-    //cameraInputRot.x *= -1.f;
-    RotateCamera(appCamera, cameraInputRot, TO_RAD(360.f) / 4.f, deltaTime);
-    MoveCamera(appCamera, cameraInputPos, 50.f, deltaTime);
+    if(input::IsMouseLocked())
+    {
+        math::v3f cameraInputPos = {0,0,0};
+        if(input::IsKeyDown(input::KEY_W)) cameraInputPos.z += 1;
+        if(input::IsKeyDown(input::KEY_S)) cameraInputPos.z -= 1;
+        if(input::IsKeyDown(input::KEY_A)) cameraInputPos.x -= 1;
+        if(input::IsKeyDown(input::KEY_D)) cameraInputPos.x += 1;
+        math::v2f cameraInputRot = input::GetMouseDelta();
+        RotateCamera(appCamera, cameraInputRot, TO_RAD(360.f) / 4.f, deltaTime);
+        MoveCamera(appCamera, cameraInputPos, 50.f, deltaTime);
+    }
 }
 
 void AppRender()
@@ -140,20 +147,14 @@ void AppRender()
     barrier.dstStage = render::PIPELINE_STAGE_COLOR_OUTPUT;
     render::CmdPipelineBarrierTextureLayout(hCmd, render::GetColorOutput(hRenderTargetMain, 0), render::IMAGE_LAYOUT_COLOR_OUTPUT, barrier);
 
+    UpdateTerrainConstants();
+    UpdateGrassConstants();
+    UpdateGrassUniforms();
     RenderTerrain(hCmd);
     RenderGrassInstances(hCmd);
 
     // Render GUI
     render::BeginRenderPass(hCmd, hRenderPassUI);
-    //SStr(debugStr, 2048);
-    //str::Format(debugStr, "Camera position: %.2f\t%.2f\t%.2f", camera.position.x, camera.position.y, camera.position.z);
-    //egui::Text(debugStr);
-    //str::Format(debugStr, "Camera axisX: %.2f\t%.2f\t%.2f", camera.axisRight.x, camera.axisRight.y, camera.axisRight.z);
-    //egui::Text(debugStr);
-    //str::Format(debugStr, "Camera axisY: %.2f\t%.2f\t%.2f", camera.axisUp.x, camera.axisUp.y, camera.axisUp.z);
-    //egui::Text(debugStr);
-    //str::Format(debugStr, "Camera axisZ: %.2f\t%.2f\t%.2f", camera.axisFront.x, camera.axisFront.y, camera.axisFront.z);
-    //egui::Text(debugStr);
     egui::DrawFrame(hCmd);
     render::EndRenderPass(hCmd, hRenderPassUI);
 

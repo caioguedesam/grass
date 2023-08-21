@@ -7,6 +7,7 @@ layout(push_constant) uniform uConstantBlock
 {
     mat4 view;
     mat4 proj;
+    float terrainSize;
 } uConstants;
 
 layout(location = 0) out struct
@@ -16,6 +17,11 @@ layout(location = 0) out struct
 
 void main()
 {
-    gl_Position = uConstants.proj * uConstants.view * vec4(aPosition, 1);
+    mat4 worldMatrix = mat4(
+            vec4(uConstants.terrainSize, 0, 0, 0),
+            vec4(0, uConstants.terrainSize, 0, 0),
+            vec4(0, 0, uConstants.terrainSize, 0),
+            vec4(0, 0, 0, 1));
+    gl_Position = uConstants.proj * uConstants.view * worldMatrix * vec4(aPosition, 1);
     VOut.Color = vec4(aPosition, 1);
 }

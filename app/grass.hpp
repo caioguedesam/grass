@@ -13,12 +13,7 @@ namespace ty
 namespace Grass
 {
 
-const i32 maxGrassInstances = 256 * 256;
-struct GrassPositionConstantBlock
-{
-    u32 terrainSize = 0;
-    u32 maxGrassBladeCount = 0;
-};
+const i32 maxGrassInstances = 256 * 256 * 16;
 
 struct GrassInstanceDataBlock
 {
@@ -28,14 +23,7 @@ struct GrassInstanceDataBlock
     f32 padding1[2];
 };
 
-struct GrassRenderUniformBlock
-{
-    //TODO(caio): Grass density. Use a value here instead of on constant block, which can be tweaked at runtime
-    f32 windTiling = 1;
-    f32 windStrength = 1;
-};
-
-struct GrassRenderConstantBlock
+struct GrassConstantBlock
 {
     math::m4f view = {};
     math::m4f proj = {};
@@ -43,6 +31,12 @@ struct GrassRenderConstantBlock
     f32 deltaTime = 0;
 };
 
+struct GrassUniformBlock
+{
+    f32 terrainSize = 256;    // Size of the terrain quad side in units
+    f32 grassDensity = 0.5;   // How much grass blades per square unit
+    math::v2f windDirection = {1, 1};   // Wind direction and magnitude. Affects wind noise tiling and grass blade deformation.
+};
 
 // Assets
 inline Handle<asset::Model> hAssetModelGrass;
@@ -58,9 +52,9 @@ inline Handle<render::Shader> hPsGrass;
 inline Handle<render::Buffer> hVbGrass;
 inline Handle<render::Buffer> hIbGrass;
 inline Handle<render::Buffer> hSbGrassInstanceData;
-inline GrassRenderConstantBlock grassRenderConstants;
-inline GrassRenderUniformBlock grassRenderUniforms;
-inline Handle<render::Buffer> hUbGrassRenderUniforms;
+inline GrassConstantBlock grassConstants;
+inline GrassUniformBlock grassUniforms;
+inline Handle<render::Buffer> hUbGrass;
 inline Handle<render::Texture> hTexWindNoise;
 inline Handle<render::Buffer> hStagingTexWindNoise;
 
@@ -80,7 +74,8 @@ void InitGrass(Handle<render::RenderTarget> hRenderTarget);
 void ShutdownGrass();
 
 void InitGrassPositions();
-
+void UpdateGrassConstants();
+void UpdateGrassUniforms();
 void RenderGrassInstances(Handle<render::CommandBuffer> hCmd);
 
 };  // namespace Grass

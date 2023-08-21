@@ -24,8 +24,9 @@ layout(std140, set = 0, binding = 0) readonly buffer InstanceDataBlock
 
 layout(std140, set = 0, binding = 1) uniform UniformBlock
 {
-    float windTiling;
-    float windStrength;
+    float terrainSize;
+    float grassDensity;
+    vec2 windDirection;
 } uUniforms;
 
 layout(set = 0, binding = 2) uniform sampler2D texWindNoise;
@@ -43,15 +44,15 @@ void main()
 
     // Wind displaces vertices based on their height, so bases stay intact
     //TODO(caio): This should bend instead of just translating vertices
-    vec2 windUV = instanceData.uv + (uConstants.worldTime * uUniforms.windTiling * vec2(-1,-1));
+    float windStrength = length(uUniforms.windDirection);
+    vec2 windDirection = normalize(uUniforms.windDirection);
+    vec2 windUV = instanceData.uv + (uConstants.worldTime * uUniforms.windDirection);
     float windDisplacement = aPosition.y
-        * uUniforms.windStrength
+        * windStrength
         * texture(texWindNoise, windUV).r;
     
-    vec3 windDirection = vec3(0, 0, 1); //TODO(caio): Make this dynamic instead of hardcoded.
-    
     vec3 finalPosition = instanceData.position
-        + (windDisplacement * windDirection);
+        + (windDisplacement * vec3(windDirection.x, 0, windDirection.y));
     
     mat4 instanceTranslation = mat4(
             vec4(1, 0, 0, 0),

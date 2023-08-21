@@ -8,12 +8,11 @@ namespace ty
 namespace Grass
 {
 
-const f32 terrainSize = 256;
-
-struct TerrainRenderConstantBlock
+struct TerrainConstantBlock
 {
     math::m4f view = {};
     math::m4f proj = {};
+    f32 terrainSize = 256;
 };
 
 // Assets
@@ -25,7 +24,7 @@ inline Handle<render::Shader> hVsTerrain;
 inline Handle<render::Shader> hPsTerrain;
 inline Handle<render::Buffer> hVbTerrain;
 inline Handle<render::Buffer> hIbTerrain;
-inline TerrainRenderConstantBlock terrainRenderConstants;
+inline TerrainConstantBlock terrainConstants;
 //TODO(caio): Heightmap stuff
 
 // Terrain render pass
@@ -38,6 +37,7 @@ inline Handle<render::GraphicsPipeline> hGraphicsPipelineTerrainRender;
 void InitTerrain(Handle<render::RenderTarget> hRenderTarget);
 void ShutdownTerrain();
 
+void UpdateTerrainConstants();
 void RenderTerrain(Handle<render::CommandBuffer> hCmd);
 
 };  // namespace Grass

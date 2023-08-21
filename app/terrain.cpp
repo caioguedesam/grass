@@ -11,10 +11,10 @@ namespace Grass
 f32 terrainQuadData[] =
 {
     // position (x, y, z), normal (x, y, z), uv (u, v)
-    0 * terrainSize, 0.f, 0 * terrainSize,  0.f, 1.f, 0.f, 0.f, 0.f,
-    1 * terrainSize, 0.f, 0 * terrainSize,   0.f, 1.f, 0.f, 0.f, 0.f,
-    1 * terrainSize, 0.f, 1 * terrainSize,    0.f, 1.f, 0.f, 0.f, 0.f,
-    0 * terrainSize, 0.f, 1 * terrainSize,   0.f, 1.f, 0.f, 0.f, 0.f,
+    0.f, 0.f, 0.f,   0.f, 1.f, 0.f,  0.f, 0.f,
+    1.f, 0.f, 0.f,   0.f, 1.f, 0.f,  0.f, 0.f,
+    1.f, 0.f, 1.f,   0.f, 1.f, 0.f,  0.f, 0.f,
+    0.f, 0.f, 1.f,   0.f, 1.f, 0.f,  0.f, 0.f,
 };
 
 u32 terrainQuadIndices[] =
@@ -40,7 +40,7 @@ void InitTerrain(Handle<render::RenderTarget> hRenderTarget)
             ARR_LEN(terrainQuadIndices) * sizeof(u32),
             sizeof(u32),
             terrainQuadIndices);
-    terrainRenderConstants = {};
+    terrainConstants = {};
 
     // Render pipeline
     render::RenderPassDesc renderPassTerrainRenderDesc = {};
@@ -64,7 +64,7 @@ void InitTerrain(Handle<render::RenderTarget> hRenderTarget)
     pipelineTerrainDesc.hShaderPixel = hPsTerrain;
     pipelineTerrainDesc.pushConstantRangeCount = 1;
     pipelineTerrainDesc.pushConstantRanges[0].offset = 0;
-    pipelineTerrainDesc.pushConstantRanges[0].size = sizeof(TerrainRenderConstantBlock);
+    pipelineTerrainDesc.pushConstantRanges[0].size = sizeof(TerrainConstantBlock);
     pipelineTerrainDesc.pushConstantRanges[0].shaderStages = render::SHADER_TYPE_VERTEX;
     hGraphicsPipelineTerrainRender = render::MakeGraphicsPipeline(hRenderPassTerrainRender, pipelineTerrainDesc, 0, NULL);
 
@@ -72,17 +72,21 @@ void InitTerrain(Handle<render::RenderTarget> hRenderTarget)
 
 void ShutdownTerrain()
 {
+}
 
+void UpdateTerrainConstants()
+{
+    terrainConstants.view = math::Transpose(appCamera.GetView());
+    terrainConstants.proj = math::Transpose(appCamera.GetProjection());
+    //TODO(caio): Update via egui
+    terrainConstants.terrainSize = 256;
 }
 
 void RenderTerrain(Handle<render::CommandBuffer> hCmd)
 {
     render::BeginRenderPass(hCmd, hRenderPassTerrainRender);
     render::CmdBindGraphicsPipeline(hCmd, hGraphicsPipelineTerrainRender);
-    TerrainRenderConstantBlock constants = {};
-    constants.view = math::Transpose(appCamera.GetView());
-    constants.proj = math::Transpose(appCamera.GetProjection());
-    render::CmdUpdatePushConstantRange(hCmd, 0, &constants, hGraphicsPipelineTerrainRender);
+    render::CmdUpdatePushConstantRange(hCmd, 0, &terrainConstants, hGraphicsPipelineTerrainRender);
     render::CmdSetViewport(hCmd, hRenderPassTerrainRender);
     render::CmdSetScissor(hCmd, hRenderPassTerrainRender);
     render::CmdBindVertexBuffer(hCmd, hVbTerrain);

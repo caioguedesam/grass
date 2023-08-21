@@ -2,8 +2,10 @@
 
 layout(push_constant) uniform uConstantBlock
 {
-    uint terrainSize;
-    uint maxGrassBladeCount;
+    mat4 view;
+    mat4 proj;
+    float worldTime;
+    float deltaTime;
 } uConstants;
 
 struct GrassInstanceData
@@ -17,6 +19,13 @@ layout(std140, set = 0, binding = 0) buffer InstanceDataBlock
     GrassInstanceData data[];
 } uInstances;
 
+layout(std140, set = 0, binding = 1) uniform UniformBlock
+{
+    float terrainSize;
+    float grassDensity;
+    vec2 windDirection;
+} uUniforms;
+
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 float random(vec2 st)
@@ -26,9 +35,10 @@ float random(vec2 st)
 
 void main()
 {
+    uint grassInstanceCount = uint(uUniforms.grassDensity * uUniforms.terrainSize * uUniforms.terrainSize);
     // bladesPerSide x bladesPerSide total blades
-    uint bladesPerSide = uint(sqrt(uConstants.maxGrassBladeCount));
-    float spacingPerBlade = float(uConstants.terrainSize) / float(bladesPerSide);
+    uint bladesPerSide = uint(sqrt(grassInstanceCount));
+    float spacingPerBlade = float(uUniforms.terrainSize) / float(bladesPerSide);
 
     uint gridX = gl_GlobalInvocationID.x;
     uint gridY = gl_GlobalInvocationID.y;
@@ -39,9 +49,9 @@ void main()
             float(gridY) / float(bladesPerSide));
 
     vec3 bladePosition = vec3(
-            bladeUV.x * uConstants.terrainSize + random(vec2(bladeUV.xy)) * spacingPerBlade,
+            bladeUV.x * uUniforms.terrainSize + random(vec2(bladeUV.xy)) * spacingPerBlade,
             0,
-            bladeUV.y * uConstants.terrainSize + random(vec2(bladeUV.yx)) * spacingPerBlade);
+            bladeUV.y * uUniforms.terrainSize + random(vec2(bladeUV.yx)) * spacingPerBlade);
     uInstances.data[iid].position = bladePosition;
     uInstances.data[iid].uv = bladeUV;
 }
