@@ -27,7 +27,6 @@
 
 // TODO_LIST:
 // App:
-// - Refactoring
 // - ...
 // Engine:
 // - Indirect draw for GPU driven rendering
@@ -77,7 +76,7 @@ void AppInit()
     renderPassUIDesc.initialLayout = render::IMAGE_LAYOUT_COLOR_OUTPUT;
     renderPassUIDesc.finalLayout = render::IMAGE_LAYOUT_TRANSFER_SRC;
     hRenderPassUI = render::MakeRenderPass(renderPassUIDesc, hRenderTargetMain);
-    egui::Init(hRenderPassUI);
+    egui::Init(&window, hRenderPassUI);
 
     // App settings
     input::SetMouseLock(true);
@@ -150,7 +149,14 @@ void AppRender()
     UpdateTerrainConstants();
     UpdateGrassConstants();
     UpdateGrassUniforms();
+
     RenderTerrain(hCmd);
+    PopulateGrassPositions(hCmd);
+    barrier.srcAccess = render::MEMORY_ACCESS_SHADER_WRITE;
+    barrier.dstAccess = render::MEMORY_ACCESS_SHADER_READ;
+    barrier.srcStage = render::PIPELINE_STAGE_COMPUTE_SHADER;
+    barrier.dstStage = render::PIPELINE_STAGE_VERTEX_SHADER;
+    render::CmdPipelineBarrier(hCmd, barrier);
     RenderGrassInstances(hCmd);
 
     // Render GUI

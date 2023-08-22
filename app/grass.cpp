@@ -167,15 +167,7 @@ void InitGrassPositions()
     // TODO(caio): For dynamic grass density, will need to populate these every frame
     Handle<render::CommandBuffer> hCmd = render::GetAvailableCommandBuffer(render::COMMAND_BUFFER_IMMEDIATE);
     render::BeginCommandBuffer(hCmd);
-    render::CmdBindComputePipeline(hCmd, hComputePipelineGrassPositions);
-    render::CmdUpdatePushConstantRange(hCmd, 0, &grassConstants, hComputePipelineGrassPositions);
-    render::CmdBindComputeResources(hCmd, hComputePipelineGrassPositions, hResourceSetGrassPositions, 0);
-
-    i32 grassInstanceCount = grassUniforms.grassDensity * terrainConstants.terrainSize * terrainConstants.terrainSize;
-    i32 bladesPerSide = (i32)(sqrt(grassInstanceCount));
-    i32 localSizeX = 16;
-    i32 localSizeY = 16;
-    render::CmdDispatch(hCmd, bladesPerSide/localSizeX, bladesPerSide/localSizeY, 1);
+    PopulateGrassPositions(hCmd);
     render::EndCommandBuffer(hCmd);
     render::SubmitImmediate(hCmd);
 }
@@ -191,13 +183,25 @@ void UpdateGrassConstants()
 void UpdateGrassUniforms()
 {
     //TODO(caio): CONTINUE:
-    // - Grass density doesn't update at runtime, since positions are only initialized once.
     // - Add color uniforms
-    // - Make more friendly GUI
     egui::DragF32(IStr("Grass Density"), &grassUniforms.grassDensity, 0.1f, 0.1f, 10.f);
-    egui::SliderV2F(IStr("Wind Vector"), &grassUniforms.windDirection, -3.f, 3.f);
+    egui::SliderAngle(IStr("Wind Angle"), &grassUniforms.windAngle);
+    egui::SliderF32(IStr("Wind Strength"), &grassUniforms.windStrength, 0, 10);
     grassUniforms.terrainSize = terrainConstants.terrainSize;
     render::CopyMemoryToBuffer(hUbGrass, 0, sizeof(GrassUniformBlock), &grassUniforms);
+}
+
+void PopulateGrassPositions(Handle<render::CommandBuffer> hCmd)
+{
+    render::CmdBindComputePipeline(hCmd, hComputePipelineGrassPositions);
+    render::CmdUpdatePushConstantRange(hCmd, 0, &grassConstants, hComputePipelineGrassPositions);
+    render::CmdBindComputeResources(hCmd, hComputePipelineGrassPositions, hResourceSetGrassPositions, 0);
+
+    i32 grassInstanceCount = grassUniforms.grassDensity * terrainConstants.terrainSize * terrainConstants.terrainSize;
+    i32 bladesPerSide = (i32)(sqrt(grassInstanceCount));
+    i32 localSizeX = 16;
+    i32 localSizeY = 16;
+    render::CmdDispatch(hCmd, bladesPerSide/localSizeX, bladesPerSide/localSizeY, 1);
 }
 
 void RenderGrassInstances(Handle<render::CommandBuffer> hCmd)

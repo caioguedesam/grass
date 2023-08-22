@@ -26,7 +26,10 @@ layout(std140, set = 0, binding = 1) uniform UniformBlock
 {
     float terrainSize;
     float grassDensity;
-    vec2 windDirection;
+    //vec2 windDirection;
+    float windAngle;
+    float windStrength;
+
 } uUniforms;
 
 layout(set = 0, binding = 2) uniform sampler2D texWindNoise;
@@ -44,11 +47,21 @@ void main()
 
     // Wind displaces vertices based on their height, so bases stay intact
     //TODO(caio): This should bend instead of just translating vertices
-    float windStrength = length(uUniforms.windDirection);
-    vec2 windDirection = normalize(uUniforms.windDirection);
-    vec2 windUV = instanceData.uv + (uConstants.worldTime * uUniforms.windDirection);
+    //float windStrength = length(uUniforms.windDirection);
+    //vec2 windDirection = normalize(uUniforms.windDirection);
+    //vec2 windUV = instanceData.uv + (uConstants.worldTime * uUniforms.windDirection);
+
+    vec2 windDirection = vec2(0, 1);
+    float windAngleSin = sin(uUniforms.windAngle);
+    float windAngleCos = cos(uUniforms.windAngle);
+    windDirection = vec2(
+            windDirection.x * windAngleCos - windDirection.y * windAngleSin,
+            windDirection.x * windAngleSin + windDirection.y * windAngleCos);
+
+    vec2 windUV = instanceData.uv + (uConstants.worldTime * windDirection);
     float windDisplacement = aPosition.y
-        * windStrength
+        //* windStrength
+        * uUniforms.windStrength
         * texture(texWindNoise, windUV).r;
     
     vec3 finalPosition = instanceData.position

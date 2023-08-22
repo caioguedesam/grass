@@ -33,9 +33,11 @@ struct GrassConstantBlock
 
 struct GrassUniformBlock
 {
-    f32 terrainSize = 256;    // Size of the terrain quad side in units
-    f32 grassDensity = 0.5;   // How much grass blades per square unit
-    math::v2f windDirection = {1, 1};   // Wind direction and magnitude. Affects wind noise tiling and grass blade deformation.
+    f32 terrainSize = 256;    // Size of the terrain quad side in units.
+    f32 grassDensity = 0.5;   // How much grass blades per square unit.
+    //math::v2f windDirection = {1, 1};   // Wind direction and magnitude. Affects wind noise tiling and grass blade deformation.
+    f32 windAngle = 0.f;        // Wind direction angle in radians.
+    f32 windStrength = 1.f;     // How much leaves are affected by wind.
 };
 
 // Assets
@@ -76,6 +78,7 @@ void ShutdownGrass();
 void InitGrassPositions();
 void UpdateGrassConstants();
 void UpdateGrassUniforms();
+void PopulateGrassPositions(Handle<render::CommandBuffer> hCmd);
 void RenderGrassInstances(Handle<render::CommandBuffer> hCmd);
 
 };  // namespace Grass
